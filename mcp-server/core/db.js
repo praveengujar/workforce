@@ -176,6 +176,34 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(4, new Date().toISOString());
     console.error('[db] Applied migration 4: experiment columns on tasks');
   }
+
+  // Migration 5: dependency graph + shared context
+  const m5 = db.prepare('SELECT version FROM schema_migrations WHERE version = 5').get();
+  if (!m5) {
+    try {
+      db.exec("ALTER TABLE tasks ADD COLUMN parentId TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN dependsOn TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN taskGroup TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN phase INTEGER");
+      db.exec("ALTER TABLE tasks ADD COLUMN resultSummary TEXT");
+    } catch { /* columns may already exist */ }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS shared_context (
+        id         TEXT PRIMARY KEY,
+        taskGroup  TEXT NOT NULL,
+        taskId     TEXT,
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        createdAt  TEXT NOT NULL,
+        UNIQUE(taskGroup, key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_shared_context_group ON shared_context(taskGroup);
+    `);
+
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(5, new Date().toISOString());
+    console.error('[db] Applied migration 5: dependency graph + shared context');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +236,7 @@ const TASK_COLUMNS = new Set([
   'createdAt', 'startedAt', 'completedAt', 'archivedAt',
   'tmuxSession', 'autoMerge', 'profile',
   'taskType', 'experimentConfig',
+  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary',
 ]);
 
 export function updateTask(id, updates) {
@@ -356,4 +385,35 @@ export function getDailyCostHistory(scope, days = 14) {
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Shared context (for task groups / dependency chains)
+// ---------------------------------------------------------------------------
+
+export function writeSharedContext(taskGroup, taskId, key, value) {
+  const now = new Date().toISOString();
+  const id = `${taskGroup}::${key}`;
+  getDb().prepare(
+    `INSERT OR REPLACE INTO shared_context (id, taskGroup, taskId, key, value, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(id, taskGroup, taskId ?? null, key, value, now);
+}
+
+export function readSharedContext(taskGroup, key) {
+  return stmt('SELECT * FROM shared_context WHERE taskGroup = ? AND key = ?').get(taskGroup, key);
+}
+
+export function readAllSharedContext(taskGroup) {
+  return stmt('SELECT * FROM shared_context WHERE taskGroup = ? ORDER BY createdAt ASC').all(taskGroup);
+}
+
+export function deleteSharedContext(taskGroup, key) {
+  stmt('DELETE FROM shared_context WHERE taskGroup = ? AND key = ?').run(taskGroup, key);
+}
+
+export function getTasksByGroup(taskGroup) {
+  return stmt(
+    "SELECT * FROM tasks WHERE taskGroup = ? ORDER BY phase ASC, createdAt ASC",
+  ).all(taskGroup);
 }

@@ -31,7 +31,9 @@ import {
   getBudget,
   getCostForPeriod,
   recordCost,
+  readAllSharedContext,
 } from './db.js';
+import { getReadyTasks, getCascadeFailures } from './dependency-resolver.js';
 import { logEvent } from './task-events.js';
 import { createToken, removeToken } from './project-state.js';
 import {
@@ -108,12 +110,47 @@ const CLAUDE_CLI = findClaudeCli();
 // Core: promotePending
 // ---------------------------------------------------------------------------
 async function promotePending() {
+  // 1. Cascade-fail any pending tasks whose dependencies have failed
+  try {
+    const cascadeFailures = getCascadeFailures();
+    for (const task of cascadeFailures) {
+      let failedDepIds = [];
+      try {
+        const deps = JSON.parse(task.dependsOn);
+        for (const depId of deps) {
+          const dep = getTask(depId);
+          if (dep && dep.status === 'failed') failedDepIds.push(depId);
+        }
+      } catch { /* ignore */ }
+      const depList = failedDepIds.join(', ');
+      updateTask(task.id, {
+        status: 'failed',
+        error: `Dependency failed: task ${depList} is failed`,
+        completedAt: new Date().toISOString(),
+      });
+      logEvent(task.id, 'cascade_failed', `Dependency failed: ${depList}`);
+      console.error(`[promotePending] Cascade-failed task ${task.id} due to failed deps: ${depList}`);
+    }
+  } catch (err) {
+    console.error('[promotePending] Cascade failure check error:', err.message);
+  }
+
+  // 2. Check available capacity
   const running = getRunningTasks();
   let slots = MAX_CONCURRENT - running.length;
   if (slots <= 0) return;
 
-  const pending = getPendingTasks();
-  for (const task of pending) {
+  // 3. Only promote tasks whose dependencies are fully satisfied
+  const ready = getReadyTasks();
+  // Sort by phase ASC (lower phase = higher priority), then createdAt ASC
+  ready.sort((a, b) => {
+    const phaseA = a.phase ?? Number.MAX_SAFE_INTEGER;
+    const phaseB = b.phase ?? Number.MAX_SAFE_INTEGER;
+    if (phaseA !== phaseB) return phaseA - phaseB;
+    return (a.createdAt || '').localeCompare(b.createdAt || '');
+  });
+
+  for (const task of ready) {
     if (slots <= 0) break;
     const claimed = claimTask(task.id, 'server');
     if (!claimed) continue;
@@ -257,6 +294,36 @@ async function spawnWorker(task) {
     }
   } catch {
     // ignore
+  }
+
+  // Layer 5: Upstream task results — inject dependency outputs
+  if (task.dependsOn) {
+    try {
+      const deps = JSON.parse(task.dependsOn);
+      const upstreamResults = [];
+      for (const depId of deps) {
+        const dep = getTask(depId);
+        if (dep && dep.resultSummary) {
+          upstreamResults.push(`Task ${depId.slice(0, 8)} (${dep.status}): "${dep.prompt.slice(0, 80)}"\n  Result: ${dep.resultSummary}`);
+        }
+      }
+      if (upstreamResults.length > 0) {
+        effectivePrompt += `\n\n[Upstream Task Results]\n${upstreamResults.join('\n\n')}`;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Layer 6: Shared context for task group
+  if (task.taskGroup) {
+    try {
+      const contextEntries = readAllSharedContext(task.taskGroup);
+      if (contextEntries.length > 0) {
+        const contextLines = contextEntries.map(e => `${e.key}: ${e.value}`).join('\n');
+        // Cap at 2000 chars to avoid prompt bloat
+        const capped = contextLines.length > 2000 ? contextLines.slice(0, 2000) + '\n...(truncated)' : contextLines;
+        effectivePrompt += `\n\n[Shared Context]\n${capped}`;
+      }
+    } catch { /* ignore */ }
   }
 
   // 3. Spawn Claude CLI
@@ -517,6 +584,33 @@ async function handleTmuxWorkerExit(taskId, output) {
     }
   } catch { /* ignore */ }
 
+  // Auto-extract result summary from output (only on success)
+  const freshTaskTmux = getTask(taskId);
+  if (freshTaskTmux && (freshTaskTmux.status === 'review' || freshTaskTmux.status === 'done')) {
+    try {
+      const outputText = cleanOutput || output || '';
+      const summaryPatterns = [
+        /Result:\s*(.+)/i,
+        /Summary:\s*(.+)/i,
+        /Done:\s*(.+)/i,
+        /Created:\s*(.+)/i,
+      ];
+      let summary = null;
+      for (const pattern of summaryPatterns) {
+        const match = outputText.match(pattern);
+        if (match) { summary = match[1].trim().slice(0, 500); break; }
+      }
+      // Fallback: last meaningful line
+      if (!summary) {
+        const lines = outputText.trim().split('\n').filter(l => l.trim().length > 10);
+        summary = lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 500) : null;
+      }
+      if (summary) {
+        updateTask(taskId, { resultSummary: summary });
+      }
+    } catch { /* ignore */ }
+  }
+
   releaseTaskClaim(taskId);
   removeWorker(taskId);
   removeToken(taskId);
@@ -610,6 +704,33 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
     }
   } catch {
     // ignore cost parsing errors
+  }
+
+  // Auto-extract result summary from output (only on success)
+  const freshTaskAfterExit = getTask(taskId);
+  if (freshTaskAfterExit && (freshTaskAfterExit.status === 'review' || freshTaskAfterExit.status === 'done')) {
+    try {
+      const outputText = output || stdout || '';
+      const summaryPatterns = [
+        /Result:\s*(.+)/i,
+        /Summary:\s*(.+)/i,
+        /Done:\s*(.+)/i,
+        /Created:\s*(.+)/i,
+      ];
+      let summary = null;
+      for (const pattern of summaryPatterns) {
+        const match = outputText.match(pattern);
+        if (match) { summary = match[1].trim().slice(0, 500); break; }
+      }
+      // Fallback: last meaningful line
+      if (!summary) {
+        const lines = outputText.trim().split('\n').filter(l => l.trim().length > 10);
+        summary = lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 500) : null;
+      }
+      if (summary) {
+        updateTask(taskId, { resultSummary: summary });
+      }
+    } catch { /* ignore */ }
   }
 
   // 7. Release claim, remove worker

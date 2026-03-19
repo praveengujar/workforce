@@ -11,6 +11,7 @@ import {
   getAllTasks, getTask, createTask as dbCreateTask, updateTask,
   getRunningTasks, releaseTaskClaim, removeWorker,
 } from '../core/db.js';
+import { detectCycles } from '../core/dependency-resolver.js';
 import { logEvent, getTaskTimeline } from '../core/task-events.js';
 import { cancelTask as cancelTaskToken } from '../core/project-state.js';
 import { promotePending, cleanupWorktree } from '../core/worker-manager.js';
@@ -26,8 +27,16 @@ function ensureDir(dir) {
 // ---------------------------------------------------------------------------
 // createTaskHandler
 // ---------------------------------------------------------------------------
-export async function createTaskHandler({ prompt, project, profile, autoMerge }) {
+export async function createTaskHandler({ prompt, project, profile, autoMerge, parent_id, depends_on, group, phase }) {
   if (!prompt) throw new Error('prompt is required');
+
+  // Validate depends_on references exist
+  if (depends_on && Array.isArray(depends_on)) {
+    for (const depId of depends_on) {
+      const dep = getTask(depId);
+      if (!dep) throw new Error(`Dependency task ${depId} not found`);
+    }
+  }
 
   const id = randomUUID();
   let task = dbCreateTask({ id, prompt, project });
@@ -36,8 +45,29 @@ export async function createTaskHandler({ prompt, project, profile, autoMerge })
   const extras = {};
   if (profile) extras.profile = profile;
   if (autoMerge) extras.autoMerge = autoMerge ? 1 : 0;
+  if (parent_id) extras.parentId = parent_id;
+  if (depends_on && depends_on.length > 0) extras.dependsOn = JSON.stringify(depends_on);
+  if (group) extras.taskGroup = group;
+  if (phase != null) extras.phase = phase;
   if (Object.keys(extras).length > 0) {
     task = updateTask(id, extras);
+  }
+
+  // Cycle detection after task is created with deps
+  if (depends_on && depends_on.length > 0) {
+    try {
+      const allTasks = getAllTasks();
+      const cycle = detectCycles(allTasks);
+      if (cycle) {
+        // Roll back: delete the task we just created
+        const { deleteTask } = await import('../core/db.js');
+        deleteTask(id);
+        throw new Error(`Dependency cycle detected: ${cycle.map(c => c.slice(0, 8)).join(' -> ')}`);
+      }
+    } catch (err) {
+      if (err.message.includes('cycle detected')) throw err;
+      // Non-fatal cycle check error — continue
+    }
   }
 
   logEvent(id, 'task_created');
