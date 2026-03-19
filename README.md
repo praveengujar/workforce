@@ -7,10 +7,13 @@ A Claude Code plugin that turns Claude into a task orchestrator — spawning aut
 Workforce lets you run multiple Claude Code agents in parallel, each working on a separate task in its own git branch. You stay in your main Claude Code session while agents handle work autonomously in the background.
 
 - **Spawn tasks**: Give an agent a prompt, it gets its own git worktree and runs independently
+- **Chain tasks**: Create sequential task chains where each step waits for its predecessor
+- **Experiments**: Run iterative optimization loops — measure, evaluate, keep or revert
 - **Review changes**: When an agent finishes, review its diff and approve or reject
 - **Auto-recovery**: A recovery engine detects stuck tasks, ghost processes, and merge failures — fixes them automatically
-- **Cost tracking**: Self-calibrating cost model estimates and tracks spend per task
+- **Cost tracking**: Self-calibrating cost model estimates and tracks spend per task, with budget limits and cost watchdog
 - **Backlog management**: Maintain a prioritized queue of work items, launch them as agent tasks
+- **Inter-task context**: Share context between tasks in a group and resolve dependencies automatically
 
 ## Install
 
@@ -29,12 +32,14 @@ claude plugin install /path/to/workforce --scope user
 Once installed, use these slash commands inside Claude Code:
 
 ```
-/workforce                          # Dashboard — see all running tasks, queue, costs
-/workforce-launch "fix the login bug"   # Spawn an agent task
-/workforce-review                   # Review completed task diffs, approve/reject
-/workforce-backlog                  # Manage work items
-/workforce-health                   # Performance metrics and cost tracking
-/workforce-decompose "big task"     # Break complex work into subtasks
+/workforce                             # Dashboard — see all running tasks, queue, costs
+/workforce-launch "fix the login bug"  # Spawn an agent task
+/workforce-review                      # Review completed task diffs, approve/reject
+/workforce-backlog                     # Manage work items
+/workforce-health                      # Performance metrics and cost tracking
+/workforce-decompose "big task"        # Break complex work into subtasks
+/workforce-chain                       # Create sequential task chains with dependencies
+/workforce-experiment                  # Run iterative optimization experiments
 ```
 
 ## How it works
@@ -56,6 +61,30 @@ pending → running → review → merging → done
 3. **Review**: When the agent finishes and files changed, the task enters review. You see the diff and approve or reject.
 4. **Merge**: On approval, changes merge to main with a per-repo lock to prevent conflicts between concurrent tasks.
 5. **Cleanup**: Worktree and branch are removed. Task auto-archives after 5 minutes.
+
+### Task chaining & dependencies
+
+Tasks can declare dependencies on other tasks. The dependency resolver provides:
+
+- **Phase-based execution**: Tasks are topologically sorted into execution phases
+- **Automatic blocking**: Dependent tasks wait until predecessors complete
+- **Cycle detection**: Circular dependencies are caught before execution
+- **Group status**: View all tasks in a dependency group with a tree visualization
+
+Use `/workforce-chain` to create chains naturally:
+```
+"First create the database schema, then build the API endpoints, then write the tests"
+```
+
+### Experiments
+
+Run iterative optimization loops with `/workforce-experiment`:
+
+1. Agent modifies code (a focused change)
+2. Runs a measurement command (e.g., `npm test`, `python train.py`)
+3. Extracts a metric from the output (e.g., val_bpb, test_pass_rate)
+4. If metric improved: keep the changes. If not: revert.
+5. Repeat until target is hit, max iterations reached, or budget exhausted.
 
 ### Recovery engine
 
@@ -82,47 +111,65 @@ Self-calibrating tier-based estimator:
 
 Tracks actual costs per tier. When the observed median drifts >15% from the estimate, the model recalibrates automatically.
 
+**Cost controls:**
+- **Budget limits** — Set per-project or global spending caps
+- **Cost watchdog** — Monitors running tasks and kills any exceeding 2x estimated cost (15s scan interval)
+- **Approval policy** — Configurable thresholds for auto-approve vs. manual approval of task costs
+
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest
-├── .mcp.json                      # MCP server config (stdio transport)
-├── CLAUDE.md                      # Project instructions
+├── .claude-plugin/plugin.json        # Plugin manifest
+├── .mcp.json                         # MCP server config (stdio transport)
+├── CLAUDE.md                         # Project instructions
 ├── README.md
 ├── mcp-server/
-│   ├── index.js                   # Entry point — registers 20 MCP tools
-│   ├── package.json               # Dependencies (@modelcontextprotocol/sdk)
+│   ├── index.js                      # Entry point — registers 34 MCP tools
+│   ├── package.json                  # Dependencies (@modelcontextprotocol/sdk)
 │   ├── core/
-│   │   ├── db.js                  # SQLite database (tasks, events, workers, claims)
-│   │   ├── worker-manager.js      # Spawn workers, handle exit, merge, cleanup
-│   │   ├── recovery-engine.js     # 6-rule self-healing scan (30s interval)
-│   │   ├── cost-model.js          # Self-calibrating tier-based cost estimator
-│   │   ├── task-events.js         # Lifecycle event logging
-│   │   ├── project-state.js       # Cancellation tokens
-│   │   ├── tmux.js                # Tmux session management
-│   │   ├── task-cost.js           # Cost estimation with adjustments
-│   │   └── profiles.js            # Agent profile management
+│   │   ├── db.js                     # SQLite database (tasks, events, workers, claims)
+│   │   ├── worker-manager.js         # Spawn workers, handle exit, merge, cleanup
+│   │   ├── recovery-engine.js        # 6-rule self-healing scan (30s interval)
+│   │   ├── cost-model.js             # Self-calibrating tier-based cost estimator
+│   │   ├── cost-tracker.js           # Cost tracking and aggregation
+│   │   ├── cost-watchdog.js          # Mid-execution cost monitoring, kills overruns
+│   │   ├── task-events.js            # Lifecycle event logging
+│   │   ├── task-cost.js              # Cost estimation with adjustments
+│   │   ├── project-state.js          # Cancellation tokens
+│   │   ├── dependency-resolver.js    # Dependency graph, topological sort, cycle detection
+│   │   ├── experiment-runner.js      # Iterative experiment execution loop
+│   │   ├── tmux.js                   # Tmux session management
+│   │   └── profiles.js              # Agent profile management
 │   ├── tools/
-│   │   ├── task-tools.js          # Create, list, cancel, retry, archive, output, reply
-│   │   ├── lifecycle-tools.js     # Diff, approve, reject
-│   │   ├── backlog-tools.js       # CRUD + reorder
-│   │   └── monitoring-tools.js    # Health metrics, cost summary, projects
+│   │   ├── task-tools.js             # Create, list, cancel, retry, archive, output, reply
+│   │   ├── lifecycle-tools.js        # Diff, approve, reject
+│   │   ├── backlog-tools.js          # CRUD + reorder
+│   │   ├── monitoring-tools.js       # Health metrics, cost summary, projects
+│   │   ├── budget-tools.js           # Budget limits and cost policy management
+│   │   ├── cost-approval.js          # Configurable approval thresholds
+│   │   ├── context-tools.js          # Shared context read/write, dependency status
+│   │   ├── experiment-tools.js       # Create, status, stop, list experiments
+│   │   ├── formatters.js             # Output formatting utilities
+│   │   └── sparkline.js              # Sparkline chart rendering
 │   └── config/
-│       ├── defaults.json          # Tunable constants (timeouts, limits)
-│       └── metrics-targets.json   # Health metric targets and warning thresholds
+│       ├── defaults.json             # Tunable constants (timeouts, limits)
+│       └── metrics-targets.json      # Health metric targets and warning thresholds
 ├── skills/
-│   ├── workforce/SKILL.md         # Dashboard view
-│   ├── workforce-launch/SKILL.md  # Task creation flow
-│   ├── workforce-review/SKILL.md  # Diff review + approve/reject
-│   ├── workforce-backlog/SKILL.md # Backlog management
-│   ├── workforce-health/SKILL.md  # Health + cost metrics
-│   └── workforce-decompose/SKILL.md  # Task decomposition
+│   ├── workforce/SKILL.md            # Dashboard view
+│   ├── workforce-launch/SKILL.md     # Task creation flow
+│   ├── workforce-review/SKILL.md     # Diff review + approve/reject
+│   ├── workforce-backlog/SKILL.md    # Backlog management
+│   ├── workforce-health/SKILL.md     # Health + cost metrics
+│   ├── workforce-decompose/SKILL.md  # Task decomposition
+│   ├── workforce-chain/SKILL.md      # Sequential task chains with dependencies
+│   └── workforce-experiment/SKILL.md # Iterative optimization experiments
 ├── agents/
-│   ├── task-planner.md            # Decomposes complex prompts into subtasks
-│   └── backlog-analyst.md         # Prioritizes and stack-ranks backlog items
+│   ├── task-planner.md               # Decomposes complex prompts into subtasks
+│   ├── backlog-analyst.md            # Prioritizes and stack-ranks backlog items
+│   └── experiment-researcher.md      # Iterative optimization agent
 └── hooks/
-    ├── hooks.json                 # SessionStart hook config
-    └── startup.js                 # Prune worktrees, abort stale merges
+    ├── hooks.json                    # SessionStart hook config
+    └── startup.js                    # Prune worktrees, abort stale merges
 ```
 
 ## MCP tools reference
@@ -131,7 +178,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 
 | Tool | Description |
 |------|-------------|
-| `workforce_create_task` | Create a new task (prompt, project, profile, autoMerge) |
+| `workforce_create_task` | Create a new task (prompt, project, profile, autoMerge, group, phase, depends_on) |
 | `workforce_list_tasks` | List tasks with optional status filter |
 | `workforce_get_task` | Get details for a specific task |
 | `workforce_cancel_task` | Cancel a running task, kill process, cleanup |
@@ -160,6 +207,35 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | `workforce_backlog_update` | Update an existing item |
 | `workforce_backlog_delete` | Remove an item |
 
+### Context & dependencies
+
+| Tool | Description |
+|------|-------------|
+| `workforce_write_context` | Write shared context for a task group |
+| `workforce_read_context` | Read shared context entries |
+| `workforce_task_dependencies` | Show dependency resolution status |
+| `workforce_group_status` | Show all tasks in a group with dependency tree |
+
+### Experiments
+
+| Tool | Description |
+|------|-------------|
+| `workforce_create_experiment` | Launch an iterative optimization experiment |
+| `workforce_experiment_status` | Check experiment progress and metrics |
+| `workforce_stop_experiment` | Gracefully stop after current iteration |
+| `workforce_list_experiments` | List all experiments |
+
+### Budget & cost control
+
+| Tool | Description |
+|------|-------------|
+| `workforce_set_budget` | Set spending budget (per-project or global) |
+| `workforce_get_budget` | Get current budget and remaining balance |
+| `workforce_set_cost_policy` | Configure auto-approve thresholds |
+| `workforce_get_cost_policy` | Get current cost approval policy |
+| `workforce_cost_watchdog_scan` | Trigger a manual cost watchdog scan |
+| `workforce_cost_log` | View cost event history |
+
 ### Monitoring
 
 | Tool | Description |
@@ -173,7 +249,7 @@ SQLite via Node.js built-in `node:sqlite` (DatabaseSync). Stored at the plugin's
 
 ### Schema
 
-**tasks** — Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, timestamps)
+**tasks** — Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, group, phase, depends_on, timestamps)
 
 **task_events** — Append-only lifecycle log (taskId, phase, detail, timestamp)
 
