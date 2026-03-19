@@ -29,6 +29,16 @@ For each subtask, provide:
 - Database migrations separate from application code
 - Prefer many small tasks over few large ones — agents work better with focused scope
 
+## Dependency Tracking
+
+When decomposing tasks, explicitly declare dependencies between subtasks:
+- Specify which subtasks can run in parallel (same phase, no deps)
+- Specify which must wait for others (higher phase, depends_on earlier tasks)
+- Use `workforce_create_task` with `depends_on`, `group`, and `phase` params
+- Generate a descriptive group ID (e.g., "auth-jwt-impl", "api-rate-limiting")
+
+After creating subtasks, show the dependency chain so the user can verify ordering before launch.
+
 ## Available tools
 
 Use `workforce_analyze_prompt` to validate each subtask's scope before presenting it. Use `workforce_create_task` to launch approved subtasks.

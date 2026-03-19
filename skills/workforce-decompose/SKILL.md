@@ -52,6 +52,27 @@ Phase 3 (parallel):   #{n}
 - Tests should be their own subtask if substantial
 - Include file paths in subtask prompts where possible (e.g., "modify `src/auth/middleware.js` to...")
 
+## Dependency-Aware Launch
+
+When launching subtasks, create them with dependency tracking:
+
+1. Generate a group ID from the original prompt (e.g., "auth-jwt-impl")
+2. For each subtask, set:
+   - `group`: the group ID
+   - `phase`: the phase number from the execution order
+   - `depends_on`: array of task IDs from earlier phases that this depends on
+3. Phase 1 tasks have no dependencies and launch immediately
+4. Phase 2+ tasks wait automatically for their dependencies to complete
+5. If a dependency fails, downstream tasks are auto-failed (cascade)
+
+After launch, show the dependency tree:
+```
+CHAIN: {group_name}
+Phase 1: ○ {id_8}, ○ {id_8}     [launching]
+Phase 2: ○ {id_8} ← {deps}      [waiting]
+Phase 3: ○ {id_8} ← {deps}      [waiting]
+```
+
 ## After Launch
 
 When the user selects tasks to launch, create them and show:

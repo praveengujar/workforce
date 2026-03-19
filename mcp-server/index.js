@@ -3,7 +3,7 @@
 /**
  * Workforce MCP Server — stdio transport.
  *
- * Exposes 30 tools for managing autonomous Claude Code agent sessions.
+ * Exposes 35 tools for managing autonomous Claude Code agent sessions.
  * Replaces the Express+WebSocket backend with a single MCP server process.
  */
 
@@ -56,6 +56,11 @@ import {
 } from './tools/experiment-tools.js';
 
 import { setExperimentProjectDir } from './core/experiment-runner.js';
+
+import {
+  writeContextHandler, readContextHandler,
+  taskDependenciesHandler, groupStatusHandler,
+} from './tools/context-tools.js';
 
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
@@ -424,6 +429,46 @@ server.tool(
   'List all experiments with status summary.',
   {},
   wrapFormatted(listExperimentsHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Context & Dependency Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_write_context',
+  'Write a key-value entry to the shared context store for a task group.',
+  {
+    group: z.string().describe('Task group ID'),
+    key: z.string().describe('Context key (e.g., "api_schema", "test_results")'),
+    value: z.string().describe('Context value (string or JSON)'),
+    task_id: z.string().optional().describe('Task that wrote this (for attribution)'),
+  },
+  wrap(writeContextHandler),
+);
+
+server.tool(
+  'workforce_read_context',
+  'Read shared context entries for a task group. Omit key to get all entries.',
+  {
+    group: z.string().describe('Task group ID'),
+    key: z.string().optional().describe('Specific key to read (omit for all)'),
+  },
+  wrap(readContextHandler),
+);
+
+server.tool(
+  'workforce_task_dependencies',
+  'Show dependency resolution status for a task — which deps are done, pending, or failed.',
+  { task_id: z.string().describe('Task ID') },
+  wrap(taskDependenciesHandler),
+);
+
+server.tool(
+  'workforce_group_status',
+  'Show all tasks in a group with dependency tree, phase progress, and shared context.',
+  { group: z.string().describe('Task group ID') },
+  wrapFormatted(groupStatusHandler),
 );
 
 // ---------------------------------------------------------------------------

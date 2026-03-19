@@ -38,6 +38,10 @@ Reproduce this layout exactly, substituting real values for `{placeholders}`:
   REVIEW NEEDED ({review_count} awaiting approval)
   ◆ {id_8}  {project}   "{prompt_40}..."   +{adds} -{dels}
 
+  CHAINS (active groups)
+  auth-impl (4 tasks): Phase 1 ✓✓ │ Phase 2 ● │ Phase 3 ○○   [2/4 done]
+  api-refactor (3 tasks): Phase 1 ●● │ Phase 2 ○              [0/3 done]
+
   RECENT (last 3)
   ✓ {id_8}  done     ${cost}   "{prompt_40}..."
   ✗ {id_8}  failed   ${cost}   "{prompt_40}..."
@@ -49,6 +53,8 @@ Reproduce this layout exactly, substituting real values for `{placeholders}`:
   ─── cost ──────────────────────────────────────────────
   Today ${today} │ Week ${week} │ Month ${month}
 ```
+
+For CHAINS, call `workforce_list_tasks` and group by `taskGroup`, showing phase progress. Skip this section if no active groups exist.
 
 For RECENT, show the last 3 completed tasks (done or failed, most recent first). Include cost if available, $0.00 if not.
 

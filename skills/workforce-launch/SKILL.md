@@ -16,7 +16,12 @@ When the user invokes /workforce-launch, create a new autonomous task with minim
 4. **If NOT admitted** (too broad, too vague, too short):
    - Show the rejection reason and offer to refine it yourself or decompose via /workforce-decompose
 
-5. **If admitted**: Call `workforce_create_task` with:
+5. If the user specifies dependencies (e.g., "after task a1b2c3d4" or "depends on the auth task"):
+   - Resolve the dependency task ID
+   - Add `depends_on: [task_id]` to the create call
+   - Show dependency info in the launch card
+
+6. **If admitted**: Call `workforce_create_task` with:
    - prompt: the final prompt
    - project: derive from current directory name unless user specifies one
    - autoMerge: default false (manual review)
@@ -35,6 +40,7 @@ When the user invokes /workforce-launch, create a new autonomous task with minim
   │ Prompt:  {full prompt text}                        │
   │ Tier:    {indicator} {tier}   Cost: ~${est}        │
   │ Project: {project}   Review: manual                │
+  │ Depends: {dep_id_8} ({dep_status})  or  "none"    │
   │ Budget:  {cost_approval_status}                    │
   └────────────────────────────────────────────────────┘
   ✓ Task {id_8} created — {position_msg}
