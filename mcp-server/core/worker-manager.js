@@ -1,0 +1,808 @@
+/**
+ * Worker Manager — core task lifecycle for the MCP server.
+ *
+ * Ported from server/index.js (lines 248-860). Manages spawning Claude CLI
+ * workers in git worktrees, handling exit/merge/cleanup, and promoting
+ * pending tasks to fill available capacity.
+ *
+ * No Express, no WebSocket — pure lifecycle logic.
+ */
+
+import { spawn, execFileSync } from 'node:child_process';
+import {
+  readFileSync,
+  existsSync,
+  mkdirSync,
+} from 'node:fs';
+import { appendFile as appendFileAsync } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+import {
+  getAllTasks,
+  getTask,
+  updateTask,
+  getRunningTasks,
+  getPendingTasks,
+  claimTask,
+  releaseTaskClaim,
+  registerWorker,
+  removeWorker,
+  getBudget,
+  getCostForPeriod,
+  recordCost,
+} from './db.js';
+import { logEvent } from './task-events.js';
+import { createToken, removeToken } from './project-state.js';
+import {
+  isTmuxAvailable,
+  createSession,
+  capturePane,
+  killSession,
+  hasSession,
+  getSessionPid,
+  isSessionAlive,
+} from './tmux.js';
+import { recordActualCost, classifyTier } from './cost-model.js';
+import { estimateTaskCost } from './task-cost.js';
+import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT || '10', 10);
+const TASK_TIMEOUT = 10 * 60 * 1000; // 600 000 ms
+const STUCK_NUDGE = 8 * 60 * 1000;   // 480 000 ms
+const AUTO_ARCHIVE_DELAY = 5 * 60 * 1000; // 300 000 ms
+const MERGE_LOCKS = new Map(); // per-repo merge serialization
+
+let PROJECT_DIR = null;
+let _promoteInterval = null;
+
+const TASKS_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function ensureDir(dir) {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+function extractTaskOutput(stdout) {
+  if (!stdout) return '';
+  const trimmed = stdout.trim();
+  return trimmed.length > 4000 ? trimmed.slice(-4000) : trimmed;
+}
+
+function extractSessionId(stderr) {
+  if (!stderr) return null;
+  const match = stderr.match(/session[_\s]*id[:\s]+([a-f0-9-]+)/i);
+  return match ? match[1] : null;
+}
+
+function gitExec(args, options = {}) {
+  return execFileSync('git', args, { stdio: 'pipe', ...options }).toString().trim();
+}
+
+function findClaudeCli() {
+  const explicit = process.env.CLAUDE_CLI;
+  if (explicit) return explicit;
+
+  const candidates = [
+    join(homedir(), '.local', 'bin', 'claude'),
+    join(homedir(), 'bin', 'claude'),
+    '/usr/local/bin/claude',
+    '/opt/homebrew/bin/claude',
+  ];
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+
+  return 'claude';
+}
+
+const CLAUDE_CLI = findClaudeCli();
+
+// ---------------------------------------------------------------------------
+// Core: promotePending
+// ---------------------------------------------------------------------------
+async function promotePending() {
+  const running = getRunningTasks();
+  let slots = MAX_CONCURRENT - running.length;
+  if (slots <= 0) return;
+
+  const pending = getPendingTasks();
+  for (const task of pending) {
+    if (slots <= 0) break;
+    const claimed = claimTask(task.id, 'server');
+    if (!claimed) continue;
+
+    try {
+      await spawnWorker(task);
+      slots--;
+    } catch (err) {
+      console.error(`[promotePending] Failed to spawn worker for ${task.id}:`, err.message);
+      releaseTaskClaim(task.id);
+      updateTask(task.id, { status: 'failed', error: `Spawn failed: ${err.message}` });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Core: spawnWorker
+// ---------------------------------------------------------------------------
+async function spawnWorker(task) {
+  const taskId = task.id;
+  const repoRoot = PROJECT_DIR;
+  const worktreePath = join(repoRoot, 'wf', taskId);
+  const branchName = `wf/${taskId}`;
+
+  // 0. Pre-launch cost gate — check budget before creating worktree
+  try {
+    const estimate = estimateTaskCost(task.prompt, task.retryCount || 0);
+    const estimatedCost = estimate.totalCost;
+    const now = new Date();
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const budgetScopes = ['global'];
+    if (task.project) budgetScopes.push(task.project);
+
+    for (const scope of budgetScopes) {
+      const budget = getBudget(scope);
+      if (!budget) continue;
+
+      const todaySpend = getCostForPeriod(scope, startOfToday, endOfDay);
+      const weekSpend = getCostForPeriod(scope, startOfWeek, endOfDay);
+      const monthSpend = getCostForPeriod(scope, startOfMonth, endOfDay);
+
+      const violations = [];
+      if (budget.dailyLimit != null && todaySpend + estimatedCost > budget.dailyLimit) {
+        violations.push(`daily ${scope}: $${todaySpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.dailyLimit.toFixed(2)}`);
+      }
+      if (budget.weeklyLimit != null && weekSpend + estimatedCost > budget.weeklyLimit) {
+        violations.push(`weekly ${scope}: $${weekSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.weeklyLimit.toFixed(2)}`);
+      }
+      if (budget.monthlyLimit != null && monthSpend + estimatedCost > budget.monthlyLimit) {
+        violations.push(`monthly ${scope}: $${monthSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.monthlyLimit.toFixed(2)}`);
+      }
+
+      if (violations.length > 0) {
+        const errorMsg = `Budget exceeded: ${violations.join('; ')}`;
+        console.error(`[spawnWorker] Budget gate blocked task ${taskId}: ${errorMsg}`);
+        updateTask(taskId, {
+          status: 'failed',
+          error: errorMsg,
+          completedAt: new Date().toISOString(),
+        });
+        logEvent(taskId, 'budget_exceeded', errorMsg);
+        releaseTaskClaim(taskId);
+        return;
+      }
+    }
+  } catch (err) {
+    // Budget check is non-fatal — log and continue
+    console.error(`[spawnWorker] Budget check error for ${taskId}:`, err.message);
+  }
+
+  // 1. Create git worktree
+  try {
+    gitExec(['worktree', 'add', worktreePath, '-b', branchName], { cwd: repoRoot });
+  } catch (err) {
+    throw new Error(`git worktree add failed: ${err.stderr?.toString() || err.message}`);
+  }
+
+  // 2. Build effective prompt with context
+  let effectivePrompt = task.prompt;
+
+  // Add context: open tasks on same project
+  try {
+    const allTasks = getAllTasks();
+    const projectTasks = allTasks.filter(
+      (t) => t.project === task.project && t.id !== taskId && t.status === 'running',
+    );
+    if (projectTasks.length > 0) {
+      const taskList = projectTasks.map((t) => `  - [${t.status}] ${t.prompt}`).join('\n');
+      effectivePrompt += `\n\n[Context] Other active tasks on this project:\n${taskList}`;
+    }
+  } catch {
+    // ignore context errors
+  }
+
+  // Add recent git log context
+  try {
+    const gitLog = gitExec(['log', '--oneline', '-5'], { cwd: repoRoot });
+    if (gitLog) {
+      effectivePrompt += `\n\n[Context] Recent commits:\n${gitLog}`;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Add project memory if available
+  try {
+    const memoryPath = join(repoRoot, '.claude', 'project-memory.md');
+    if (existsSync(memoryPath)) {
+      const memory = readFileSync(memoryPath, 'utf8').trim();
+      if (memory) {
+        effectivePrompt += `\n\n[Project Memory]\n${memory}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Add feedback examples if available
+  try {
+    const feedbackPath = join(TASKS_DIR, 'feedback.jsonl');
+    if (existsSync(feedbackPath)) {
+      const lines = readFileSync(feedbackPath, 'utf8').trim().split('\n').filter(Boolean);
+      const recent = lines.slice(-5);
+      const examples = recent
+        .map((line) => {
+          try {
+            const fb = JSON.parse(line);
+            return `  - [${fb.type}] ${fb.prompt}`;
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      if (examples.length > 0) {
+        effectivePrompt += `\n\n[Context] Recent feedback:\n${examples.join('\n')}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Spawn Claude CLI
+  ensureDir(TASKS_DIR);
+  const logPath = join(TASKS_DIR, `${taskId}.log`);
+
+  const useTmux = isTmuxAvailable();
+  const tmuxSession = `wf-${taskId.slice(0, 8)}`;
+
+  if (useTmux) {
+    // Build the full command string for tmux
+    const cliArgs = [CLAUDE_CLI, '--print', '--dangerously-skip-permissions', '-p', JSON.stringify(effectivePrompt)];
+    const fullCommand = cliArgs.map(a => typeof a === 'string' && a.includes(' ') ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
+
+    try {
+      createSession(tmuxSession, fullCommand, worktreePath);
+    } catch (err) {
+      throw new Error(`tmux session creation failed: ${err.message}`);
+    }
+
+    const pid = getSessionPid(tmuxSession) || 0;
+
+    // Register worker
+    registerWorker(taskId, pid, logPath);
+
+    // Update task
+    updateTask(taskId, {
+      status: 'running',
+      pid,
+      startedAt: new Date().toISOString(),
+      worktreePath,
+      branch: branchName,
+      tmuxSession,
+    });
+
+    logEvent(taskId, 'task_started', `tmux=${tmuxSession} pid=${pid}`);
+
+    // Start output capture loop — poll tmux pane every 2 seconds
+    let lastCaptureLength = 0;
+    const captureInterval = setInterval(() => {
+      try {
+        if (!hasSession(tmuxSession)) {
+          clearInterval(captureInterval);
+          const finalOutput = capturePane(tmuxSession);
+          handleTmuxWorkerExit(taskId, finalOutput);
+          return;
+        }
+
+        const content = capturePane(tmuxSession);
+        if (content.length > lastCaptureLength) {
+          const newContent = content.slice(lastCaptureLength);
+          lastCaptureLength = content.length;
+          appendFileAsync(logPath, newContent).catch(() => {});
+        }
+      } catch {
+        // ignore capture errors
+      }
+    }, 2000);
+
+    // Timeout watchdog
+    const timeoutTimer = setTimeout(() => {
+      console.error(`[spawnWorker] Task ${taskId} timed out — killing tmux session`);
+      logEvent(taskId, 'timeout', `Killed after ${TASK_TIMEOUT / 1000}s`);
+      killSession(tmuxSession);
+      clearInterval(captureInterval);
+    }, TASK_TIMEOUT);
+
+    // Stuck nudge
+    const nudgeTimer = setTimeout(() => {
+      logEvent(taskId, 'stuck_warning', `Running for ${STUCK_NUDGE / 1000}s`);
+    }, STUCK_NUDGE);
+
+    // Check for session end every 3 seconds
+    const exitCheckInterval = setInterval(async () => {
+      if (!hasSession(tmuxSession) || !isSessionAlive(tmuxSession)) {
+        clearInterval(exitCheckInterval);
+        clearInterval(captureInterval);
+        clearTimeout(timeoutTimer);
+        clearTimeout(nudgeTimer);
+
+        const finalOutput = capturePane(tmuxSession);
+        await handleTmuxWorkerExit(taskId, finalOutput);
+      }
+    }, 3000);
+
+    // Cancellation token
+    const token = createToken(taskId);
+    token.onCancel(() => {
+      killSession(tmuxSession);
+      clearInterval(exitCheckInterval);
+      clearInterval(captureInterval);
+      clearTimeout(timeoutTimer);
+      clearTimeout(nudgeTimer);
+    });
+
+    return; // Don't fall through to the spawn path
+  }
+
+  // --- child_process spawn path ---
+  const child = spawn(CLAUDE_CLI, ['--print', '--dangerously-skip-permissions', '-p', effectivePrompt], {
+    cwd: worktreePath,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env },
+  });
+
+  // Declare timers before use so they are in scope for the error handler
+  let timeoutTimer;
+  let nudgeTimer;
+
+  child.on('error', (err) => {
+    console.error(`[spawnWorker] Spawn error for ${taskId}:`, err.message);
+    clearTimeout(timeoutTimer);
+    clearTimeout(nudgeTimer);
+    updateTask(taskId, {
+      status: 'failed',
+      error: `Spawn error: ${err.message}`,
+      completedAt: new Date().toISOString(),
+    });
+    logEvent(taskId, 'failed', `Spawn error: ${err.message}`);
+    releaseTaskClaim(taskId);
+    removeWorker(taskId);
+    removeToken(taskId);
+  });
+
+  const pid = child.pid;
+
+  // 4. Register worker
+  registerWorker(taskId, pid, logPath);
+
+  // 5. Update task
+  updateTask(taskId, {
+    status: 'running',
+    pid,
+    startedAt: new Date().toISOString(),
+    worktreePath,
+    branch: branchName,
+  });
+
+  // 6. Log events
+  logEvent(taskId, 'task_started', `pid=${pid}`);
+  logEvent(taskId, 'claude_pid_assigned', `pid=${pid}`);
+
+  // Collect stdout/stderr
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+    appendFileAsync(logPath, chunk).catch(() => {});
+  });
+
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+    appendFileAsync(logPath, chunk).catch(() => {});
+  });
+
+  // 7. Timeout watchdog (10 min)
+  timeoutTimer = setTimeout(() => {
+    console.error(`[spawnWorker] Task ${taskId} timed out after ${TASK_TIMEOUT / 1000}s — killing`);
+    logEvent(taskId, 'timeout', `Killed after ${TASK_TIMEOUT / 1000}s`);
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  }, TASK_TIMEOUT);
+
+  // 8. Stuck nudge (8 min)
+  nudgeTimer = setTimeout(() => {
+    console.error(`[spawnWorker] Task ${taskId} has been running for ${STUCK_NUDGE / 1000}s — possible stuck`);
+    logEvent(taskId, 'stuck_warning', `Running for ${STUCK_NUDGE / 1000}s`);
+  }, STUCK_NUDGE);
+
+  // 9. On exit: handleWorkerExit
+  child.on('close', async (code) => {
+    clearTimeout(timeoutTimer);
+    clearTimeout(nudgeTimer);
+    await handleWorkerExit(task, code, stdout, stderr);
+  });
+
+  // 10. Create cancellation token
+  const token = createToken(taskId);
+  token.onCancel(() => {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Core: handleTmuxWorkerExit
+// ---------------------------------------------------------------------------
+async function handleTmuxWorkerExit(taskId, output) {
+  logEvent(taskId, 'claude_exited', 'tmux session ended');
+
+  const task = getTask(taskId);
+  if (!task) return;
+
+  const worktreePath = task.worktreePath;
+  const cleanOutput = (output || '').slice(-4000);
+
+  // Check for file changes
+  let filesChanged = false;
+  if (worktreePath) {
+    try {
+      const diff = gitExec(['diff', '--stat', 'HEAD'], { cwd: worktreePath });
+      filesChanged = diff.length > 0;
+    } catch {
+      try {
+        const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
+        filesChanged = untracked.length > 0;
+      } catch {
+        filesChanged = false;
+      }
+    }
+  }
+
+  if (filesChanged) {
+    // Commit changes
+    try {
+      gitExec(['add', '-A'], { cwd: worktreePath });
+      gitExec(['commit', '-m', 'Task work', '--allow-empty'], { cwd: worktreePath });
+    } catch { /* may already be committed */ }
+
+    updateTask(taskId, {
+      status: 'review',
+      output: cleanOutput,
+      exitCode: 0,
+    });
+    logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+  } else {
+    updateTask(taskId, {
+      status: 'failed',
+      output: cleanOutput,
+      error: 'No files changed — zero-work guard triggered',
+      exitCode: 0,
+      completedAt: new Date().toISOString(),
+    });
+    logEvent(taskId, 'failed', 'Zero-work guard');
+    cleanupWorktree(taskId, worktreePath);
+  }
+
+  // Cost tracking — enhanced with token-level detail
+  try {
+    const detailed = parseDetailedCost(output || '');
+    const actualCost = detailed.cost;
+    if (actualCost && actualCost > 0) {
+      recordActualCost(task.prompt, actualCost);
+      updateTask(taskId, { cost: actualCost });
+      const tier = classifyTier(task.prompt || '');
+      recordCost(taskId, task.project, actualCost, tier);
+      appendCostLog({
+        taskId, project: task.project || null, cost: actualCost, tier,
+        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+      });
+    }
+  } catch { /* ignore */ }
+
+  releaseTaskClaim(taskId);
+  removeWorker(taskId);
+  removeToken(taskId);
+
+  await promotePending();
+}
+
+// ---------------------------------------------------------------------------
+// Core: handleWorkerExit
+// ---------------------------------------------------------------------------
+async function handleWorkerExit(task, exitCode, stdout, stderr) {
+  const taskId = task.id;
+
+  // 1. Log exit
+  logEvent(taskId, 'claude_exited', `exitCode=${exitCode}`);
+
+  // 2. Parse output
+  const output = extractTaskOutput(stdout);
+  const sessionId = extractSessionId(stderr);
+
+  if (sessionId) {
+    updateTask(taskId, { sessionId });
+  }
+
+  // 3. Zero-work guard: did any files change?
+  let filesChanged = false;
+  const freshTask = getTask(taskId);
+  const worktreePath = freshTask?.worktreePath;
+
+  if (worktreePath) {
+    try {
+      const diff = gitExec(['diff', '--stat', 'HEAD'], { cwd: worktreePath });
+      filesChanged = diff.length > 0;
+    } catch {
+      try {
+        const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
+        filesChanged = untracked.length > 0;
+      } catch {
+        filesChanged = false;
+      }
+    }
+  }
+
+  // 4 & 5. Decide outcome
+  if (exitCode === 0 && filesChanged) {
+    try {
+      gitExec(['add', '-A'], { cwd: worktreePath });
+      gitExec(['commit', '-m', 'Task work', '--allow-empty'], { cwd: worktreePath });
+    } catch { /* may already be committed */ }
+
+    if (freshTask.autoMerge) {
+      updateTask(taskId, { output, exitCode });
+      await mergeWorktree(freshTask);
+    } else {
+      updateTask(taskId, {
+        status: 'review',
+        output,
+        exitCode: 0,
+      });
+      logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+    }
+  } else {
+    const errorMsg = exitCode !== 0
+      ? `Claude exited with code ${exitCode}. ${stderr || ''}`.trim()
+      : 'No files changed — zero-work guard triggered';
+    updateTask(taskId, {
+      status: 'failed',
+      output,
+      error: errorMsg,
+      exitCode,
+      completedAt: new Date().toISOString(),
+    });
+    logEvent(taskId, 'failed', errorMsg);
+
+    cleanupWorktree(taskId, worktreePath);
+  }
+
+  // 6. Record actual cost if available — enhanced with token-level detail
+  try {
+    const detailed = parseDetailedCost(stdout || '');
+    const actualCost = detailed.cost;
+    if (actualCost && actualCost > 0) {
+      recordActualCost(task.prompt, actualCost);
+      updateTask(taskId, { cost: actualCost });
+      const tier = classifyTier(task.prompt || '');
+      recordCost(taskId, task.project, actualCost, tier);
+      appendCostLog({
+        taskId: task.id, project: task.project || null, cost: actualCost, tier,
+        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+      });
+    }
+  } catch {
+    // ignore cost parsing errors
+  }
+
+  // 7. Release claim, remove worker
+  releaseTaskClaim(taskId);
+  removeWorker(taskId);
+
+  // 8. Cleanup token
+  removeToken(taskId);
+
+  // Try to promote next pending task
+  await promotePending();
+}
+
+// ---------------------------------------------------------------------------
+// Core: mergeWorktree
+// ---------------------------------------------------------------------------
+async function mergeWorktree(task) {
+  const taskId = task.id;
+  const repoRoot = PROJECT_DIR;
+  const branchName = `wf/${taskId}`;
+  const worktreePath = task.worktreePath || join(repoRoot, 'wf', taskId);
+
+  // 1. Acquire per-repo merge lock
+  const lockKey = repoRoot;
+  while (MERGE_LOCKS.has(lockKey)) {
+    await MERGE_LOCKS.get(lockKey);
+  }
+
+  let releaseLock;
+  const lockPromise = new Promise((r) => {
+    releaseLock = r;
+  });
+  MERGE_LOCKS.set(lockKey, lockPromise);
+
+  try {
+    // 2. Merge
+    logEvent(taskId, 'merge_started');
+    gitExec(['merge', '--no-ff', branchName], { cwd: repoRoot });
+
+    // 4. Update task
+    updateTask(taskId, {
+      merged: 1,
+      status: 'done',
+      completedAt: new Date().toISOString(),
+    });
+
+    // 5. Log merge
+    logEvent(taskId, 'merge_completed');
+  } catch (mergeErr) {
+    // 3. Check if conflict is only status.md
+    const errMsg = mergeErr.stderr?.toString() || mergeErr.message || '';
+
+    let resolved = false;
+    try {
+      const conflicts = gitExec(['diff', '--name-only', '--diff-filter=U'], { cwd: repoRoot });
+
+      if (conflicts === 'status.md') {
+        gitExec(['checkout', '--theirs', 'status.md'], { cwd: repoRoot });
+        gitExec(['add', 'status.md'], { cwd: repoRoot });
+        gitExec(['commit', '--no-edit'], { cwd: repoRoot });
+        resolved = true;
+
+        updateTask(taskId, {
+          merged: 1,
+          status: 'done',
+          completedAt: new Date().toISOString(),
+        });
+        logEvent(taskId, 'merge_completed', 'auto-resolved status.md conflict');
+      }
+    } catch {
+      // conflict resolution failed
+    }
+
+    if (!resolved) {
+      try {
+        gitExec(['merge', '--abort'], { cwd: repoRoot });
+      } catch {
+        // ignore
+      }
+
+      updateTask(taskId, {
+        mergeFailed: 1,
+        status: 'failed',
+        error: `Merge failed: ${errMsg}`,
+        completedAt: new Date().toISOString(),
+      });
+      logEvent(taskId, 'merge_failed', errMsg);
+    }
+  } finally {
+    // 6. Release merge lock
+    MERGE_LOCKS.delete(lockKey);
+    releaseLock();
+  }
+
+  // 7. Schedule auto-archive
+  scheduleAutoArchive(taskId);
+
+  // 8. Cleanup worktree with retries
+  cleanupWorktree(taskId, worktreePath);
+}
+
+// ---------------------------------------------------------------------------
+// Worktree cleanup with retries
+// ---------------------------------------------------------------------------
+function cleanupWorktree(taskId, worktreePath) {
+  if (!worktreePath) return;
+
+  const repoRoot = PROJECT_DIR;
+  const branchName = `wf/${taskId}`;
+
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  function attempt() {
+    attempts++;
+    try {
+      gitExec(['worktree', 'remove', worktreePath, '--force'], { cwd: repoRoot });
+    } catch {
+      if (attempts < maxAttempts) {
+        setTimeout(attempt, 600 * attempts);
+        return;
+      }
+      console.error(`[cleanupWorktree] Failed to remove worktree for ${taskId} after ${maxAttempts} attempts`);
+    }
+
+    // Try to delete the branch too
+    try {
+      gitExec(['branch', '-D', branchName], { cwd: repoRoot });
+    } catch {
+      // ignore — branch may not exist or may be the current branch
+    }
+  }
+
+  attempt();
+}
+
+// ---------------------------------------------------------------------------
+// Core: scheduleAutoArchive
+// ---------------------------------------------------------------------------
+function scheduleAutoArchive(taskId) {
+  setTimeout(() => {
+    try {
+      const task = getTask(taskId);
+      if (task && task.status === 'done' && !task.pinned && !task.needsInput) {
+        updateTask(taskId, {
+          status: 'archived',
+          archivedAt: new Date().toISOString(),
+        });
+        logEvent(taskId, 'archived', 'auto-archived after delay');
+      }
+    } catch (err) {
+      console.error(`[autoArchive] Error archiving ${taskId}:`, err.message);
+    }
+  }, AUTO_ARCHIVE_DELAY);
+}
+
+// ---------------------------------------------------------------------------
+// Init / Stop
+// ---------------------------------------------------------------------------
+function initWorkerManager(projectDir) {
+  PROJECT_DIR = projectDir;
+  console.error(`[worker-manager] Initialized with project dir: ${PROJECT_DIR}`);
+  console.error(`[worker-manager] Claude CLI: ${CLAUDE_CLI}`);
+  console.error(`[worker-manager] Tasks dir: ${TASKS_DIR}`);
+  console.error(`[worker-manager] Max concurrent: ${MAX_CONCURRENT}`);
+
+  // Start promote loop every 5 seconds
+  _promoteInterval = setInterval(() => {
+    promotePending().catch((err) => {
+      console.error('[worker-manager] promotePending error:', err.message);
+    });
+  }, 5000);
+}
+
+function stopWorkerManager() {
+  if (_promoteInterval) {
+    clearInterval(_promoteInterval);
+    _promoteInterval = null;
+  }
+  console.error('[worker-manager] Stopped');
+}
+
+// ---------------------------------------------------------------------------
+// Exports
+// ---------------------------------------------------------------------------
+export {
+  promotePending,
+  spawnWorker,
+  handleTmuxWorkerExit,
+  handleWorkerExit,
+  mergeWorktree,
+  cleanupWorktree,
+  scheduleAutoArchive,
+  initWorkerManager,
+  stopWorkerManager,
+};

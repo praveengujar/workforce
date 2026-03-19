@@ -1,0 +1,7 @@
+{
+  "doneRate": { "target": 0.85, "warning": 0.70 },
+  "failRate": { "target": 0.10, "warning": 0.20 },
+  "retryRate": { "target": 0.15, "warning": 0.25 },
+  "oneShotRate": { "target": 0.70, "warning": 0.50 },
+  "uptimeHours": { "target": 168, "warning": 120 }
+}

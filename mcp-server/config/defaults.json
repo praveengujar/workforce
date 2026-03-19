@@ -1,0 +1,8 @@
+{
+  "maxConcurrent": 10,
+  "taskTimeoutMs": 600000,
+  "stuckNudgeMs": 480000,
+  "autoArchiveDelayMs": 300000,
+  "recoveryIntervalMs": 30000,
+  "promoteIntervalMs": 5000
+}
