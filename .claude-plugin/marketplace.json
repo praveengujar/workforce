@@ -1,0 +1,13 @@
+{
+  "name": "workforce-local",
+  "owner": {
+    "name": "Praveen Gujar"
+  },
+  "plugins": [
+    {
+      "name": "workforce",
+      "source": "./",
+      "description": "Control plane for managing autonomous Claude Code agent sessions."
+    }
+  ]
+}

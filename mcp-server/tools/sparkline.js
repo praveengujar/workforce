@@ -74,7 +74,7 @@ export function labeledSparkline(data) {
 export function costTrendLine(dailyCosts) {
   if (!dailyCosts || dailyCosts.length === 0) return 'Cost: no data';
 
-  const values = dailyCosts.map((d) => d.total);
+  const values = dailyCosts.map((d) => d.cost ?? d.total ?? 0);
   const days = values.length;
   const total = values.reduce((a, b) => a + b, 0);
   const avg = total / days;

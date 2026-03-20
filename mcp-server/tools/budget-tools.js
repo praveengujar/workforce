@@ -55,7 +55,11 @@ export function setBudgetHandler({ scope, daily_limit, weekly_limit, monthly_lim
     updatedAt: new Date().toISOString(),
   };
 
-  setBudget(budget);
+  setBudget(budgetScope, {
+    dailyLimit: budget.dailyLimit,
+    weeklyLimit: budget.weeklyLimit,
+    monthlyLimit: budget.monthlyLimit,
+  });
 
   return {
     message: `Budget updated for "${budgetScope}"`,

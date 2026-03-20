@@ -8,6 +8,10 @@
         "WORKFORCE_MAX_CONCURRENT": "10",
         "WORKFORCE_TASK_TIMEOUT": "600000"
       }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--headless"]
     }
   }
 }

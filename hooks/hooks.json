@@ -5,6 +5,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "diff -q \"${CLAUDE_PLUGIN_ROOT}/mcp-server/package.json\" \"${CLAUDE_PLUGIN_DATA}/package.json\" >/dev/null 2>&1 || (cd \"${CLAUDE_PLUGIN_ROOT}/mcp-server\" && npm install --no-audit --no-fund 2>/dev/null && cp package.json \"${CLAUDE_PLUGIN_DATA}/package.json\")",
+            "timeout": 30000,
+            "statusMessage": "Installing workforce dependencies..."
+          },
+          {
+            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/startup.js"
           }
         ]

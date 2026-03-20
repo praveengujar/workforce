@@ -204,6 +204,16 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(5, new Date().toISOString());
     console.error('[db] Applied migration 5: dependency graph + shared context');
   }
+
+  // Migration 6: retryAfter column for backoff
+  const m6 = db.prepare('SELECT version FROM schema_migrations WHERE version = 6').get();
+  if (!m6) {
+    try {
+      db.exec("ALTER TABLE tasks ADD COLUMN retryAfter TEXT");
+    } catch { /* column may already exist */ }
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(6, new Date().toISOString());
+    console.error('[db] Applied migration 6: retryAfter column');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +246,7 @@ const TASK_COLUMNS = new Set([
   'createdAt', 'startedAt', 'completedAt', 'archivedAt',
   'tmuxSession', 'autoMerge', 'profile',
   'taskType', 'experimentConfig',
-  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary',
+  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter',
 ]);
 
 export function updateTask(id, updates) {
@@ -256,7 +266,7 @@ export function deleteTask(id) {
 }
 
 export function getRunningTasks() {
-  return stmt("SELECT * FROM tasks WHERE status = 'running' ORDER BY startedAt ASC").all();
+  return stmt("SELECT * FROM tasks WHERE status IN ('running', 'paused') ORDER BY startedAt ASC").all();
 }
 
 export function getPendingTasks() {

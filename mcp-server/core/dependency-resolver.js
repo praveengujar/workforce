@@ -205,8 +205,11 @@ export function detectCycles(tasks) {
  * @returns {Array} tasks ready to spawn
  */
 export function getReadyTasks() {
+  const now = new Date().toISOString();
   const pending = getAllTasks().filter(t => t.status === 'pending');
   return pending.filter(t => {
+    // Respect retry backoff
+    if (t.retryAfter && t.retryAfter > now) return false;
     const { satisfied } = resolveDependencies(t.id);
     return satisfied;
   });

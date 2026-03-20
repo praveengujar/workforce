@@ -10,9 +10,9 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 
 ## Stack
 
-- **MCP server** (stdio) — 20 tools for task lifecycle, backlog, monitoring
-- **Skills** — `/workforce`, `/workforce-launch`, `/workforce-review`, `/workforce-backlog`, `/workforce-health`, `/workforce-decompose`
-- **Agents** — task-planner, backlog-analyst
+- **MCP server** (stdio) — 36 tools for task lifecycle, backlog, monitoring
+- **Skills** — `/workforce`, `/workforce-launch`, `/workforce-review`, `/workforce-backlog`, `/workforce-health`, `/workforce-decompose`, `/workforce-chain`, `/workforce-experiment`, `/workforce-rescue`, `/workforce-sprint`, `/workforce-release`, `/workforce-merge`, `/workforce-qa`
+- **Agents** — task-planner, backlog-analyst, experiment-researcher, failure-forensics, release-manager, qa-engineer
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
 - **Dependency** — `@modelcontextprotocol/sdk`
 
@@ -24,8 +24,9 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
   - `core/` — DB, worker manager, recovery engine, cost model, tmux, profiles
   - `tools/` — Task, lifecycle, backlog, monitoring tool handlers
   - `config/` — Defaults, metrics targets
-- `skills/` — 6 SKILL.md files (slash commands)
-- `agents/` — 2 agent definitions
+- `skills/` — 13 SKILL.md files (slash commands)
+- `agents/` — 6 agent definitions
+- `scripts/` — Version bump utility
 - `hooks/` — SessionStart cleanup
 
 ## Task lifecycle
