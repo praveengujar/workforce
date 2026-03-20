@@ -28,7 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Tmux exit handler idempotency guard prevents double lifecycle processing
 - `promotePending` reentrance guard prevents concurrent over-spawning
 - Worktree cleanup on spawn failure (tmux and child_process paths)
-- Merge target explicitly checks out default branch before merging
+- Merge safeguard: refuses to merge into main/master (must be on a feature branch)
 - Paused tasks count toward capacity to prevent oversubscription
 - Graceful shutdown kills running tasks instead of orphaning processes
 - `WORKFORCE_MAX_CONCURRENT` and `WORKFORCE_TASK_TIMEOUT` env vars now honored

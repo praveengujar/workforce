@@ -784,19 +784,11 @@ async function mergeWorktree(task) {
   try {
     // 2. Merge
     logEvent(taskId, 'merge_started');
-    // Ensure we're on the default branch before merging
-    let defaultBranch = 'main';
-    try {
-      defaultBranch = gitExec(['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], { cwd: repoRoot }).replace('origin/', '');
-    } catch {
-      // Fallback: check if 'main' exists, else try 'master'
-      try {
-        gitExec(['rev-parse', '--verify', 'main'], { cwd: repoRoot });
-      } catch {
-        defaultBranch = 'master';
-      }
+    // Safeguard: refuse to merge into main/master to prevent accidental commits
+    const currentBranch = gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
+    if (currentBranch === 'main' || currentBranch === 'master') {
+      throw new Error(`Refusing to merge into protected branch "${currentBranch}". Checkout a feature branch first.`);
     }
-    gitExec(['checkout', defaultBranch], { cwd: repoRoot });
     gitExec(['merge', '--no-ff', branchName], { cwd: repoRoot });
 
     // 4. Update task
