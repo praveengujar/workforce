@@ -40,7 +40,9 @@ function branchExistsInGit(branchName) {
 }
 
 function rule0aZombieRetry(task) {
-  if (task.status !== 'running' || task.sessionId) return false;
+  if (task.status !== 'running') return false;
+  // Task has evidence of a live session — not a zombie
+  if (task.sessionId || task.tmuxSession || (task.pid && isPidAlive(task.pid))) return false;
   const startedAt = task.startedAt ? new Date(task.startedAt).getTime() : 0;
   if (Date.now() - startedAt < ZOMBIE_THRESHOLD_MS) return false;
   updateTask(task.id, { status: 'failed', error: 'Zombie retry: running with no session for >3 min', completedAt: new Date().toISOString() });
@@ -111,7 +113,8 @@ function rules4and5StaleOrRateLimit(task) {
   }
 
   const reason = isStaleSession ? 'stale session' : 'rate limit / overloaded';
-  updateTask(task.id, { status: 'pending', retryCount: retryCount + 1, error: null });
+  const retryAfter = new Date(Date.now() + RETRY_BACKOFF_MS * (retryCount + 1)).toISOString();
+  updateTask(task.id, { status: 'pending', retryCount: retryCount + 1, error: null, retryAfter });
   logEvent(task.id, 'retry', `Rules 4-5: ${reason} — retry ${retryCount + 1}/${maxRetries}`);
   return true;
 }

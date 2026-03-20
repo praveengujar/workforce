@@ -52,14 +52,16 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT || '10', 10);
-const TASK_TIMEOUT = 10 * 60 * 1000; // 600 000 ms
+const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '10', 10);
+const TASK_TIMEOUT = parseInt(process.env.WORKFORCE_TASK_TIMEOUT || String(10 * 60 * 1000), 10);
 const STUCK_NUDGE = 8 * 60 * 1000;   // 480 000 ms
 const AUTO_ARCHIVE_DELAY = 5 * 60 * 1000; // 300 000 ms
 const MERGE_LOCKS = new Map(); // per-repo merge serialization
+const HANDLED_EXITS = new Set(); // idempotency guard for tmux exit handling
 
 let PROJECT_DIR = null;
 let _promoteInterval = null;
+let _promoting = false;
 
 const TASKS_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
 
@@ -110,59 +112,65 @@ const CLAUDE_CLI = findClaudeCli();
 // Core: promotePending
 // ---------------------------------------------------------------------------
 async function promotePending() {
-  // 1. Cascade-fail any pending tasks whose dependencies have failed
+  if (_promoting) return;
+  _promoting = true;
   try {
-    const cascadeFailures = getCascadeFailures();
-    for (const task of cascadeFailures) {
-      let failedDepIds = [];
-      try {
-        const deps = JSON.parse(task.dependsOn);
-        for (const depId of deps) {
-          const dep = getTask(depId);
-          if (dep && dep.status === 'failed') failedDepIds.push(depId);
-        }
-      } catch { /* ignore */ }
-      const depList = failedDepIds.join(', ');
-      updateTask(task.id, {
-        status: 'failed',
-        error: `Dependency failed: task ${depList} is failed`,
-        completedAt: new Date().toISOString(),
-      });
-      logEvent(task.id, 'cascade_failed', `Dependency failed: ${depList}`);
-      console.error(`[promotePending] Cascade-failed task ${task.id} due to failed deps: ${depList}`);
-    }
-  } catch (err) {
-    console.error('[promotePending] Cascade failure check error:', err.message);
-  }
-
-  // 2. Check available capacity
-  const running = getRunningTasks();
-  let slots = MAX_CONCURRENT - running.length;
-  if (slots <= 0) return;
-
-  // 3. Only promote tasks whose dependencies are fully satisfied
-  const ready = getReadyTasks();
-  // Sort by phase ASC (lower phase = higher priority), then createdAt ASC
-  ready.sort((a, b) => {
-    const phaseA = a.phase ?? Number.MAX_SAFE_INTEGER;
-    const phaseB = b.phase ?? Number.MAX_SAFE_INTEGER;
-    if (phaseA !== phaseB) return phaseA - phaseB;
-    return (a.createdAt || '').localeCompare(b.createdAt || '');
-  });
-
-  for (const task of ready) {
-    if (slots <= 0) break;
-    const claimed = claimTask(task.id, 'server');
-    if (!claimed) continue;
-
+    // 1. Cascade-fail any pending tasks whose dependencies have failed
     try {
-      await spawnWorker(task);
-      slots--;
+      const cascadeFailures = getCascadeFailures();
+      for (const task of cascadeFailures) {
+        let failedDepIds = [];
+        try {
+          const deps = JSON.parse(task.dependsOn);
+          for (const depId of deps) {
+            const dep = getTask(depId);
+            if (dep && dep.status === 'failed') failedDepIds.push(depId);
+          }
+        } catch { /* ignore */ }
+        const depList = failedDepIds.join(', ');
+        updateTask(task.id, {
+          status: 'failed',
+          error: `Dependency failed: task ${depList} is failed`,
+          completedAt: new Date().toISOString(),
+        });
+        logEvent(task.id, 'cascade_failed', `Dependency failed: ${depList}`);
+        console.error(`[promotePending] Cascade-failed task ${task.id} due to failed deps: ${depList}`);
+      }
     } catch (err) {
-      console.error(`[promotePending] Failed to spawn worker for ${task.id}:`, err.message);
-      releaseTaskClaim(task.id);
-      updateTask(task.id, { status: 'failed', error: `Spawn failed: ${err.message}` });
+      console.error('[promotePending] Cascade failure check error:', err.message);
     }
+
+    // 2. Check available capacity
+    const running = getRunningTasks();
+    let slots = MAX_CONCURRENT - running.length;
+    if (slots <= 0) return;
+
+    // 3. Only promote tasks whose dependencies are fully satisfied
+    const ready = getReadyTasks();
+    // Sort by phase ASC (lower phase = higher priority), then createdAt ASC
+    ready.sort((a, b) => {
+      const phaseA = a.phase ?? Number.MAX_SAFE_INTEGER;
+      const phaseB = b.phase ?? Number.MAX_SAFE_INTEGER;
+      if (phaseA !== phaseB) return phaseA - phaseB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+
+    for (const task of ready) {
+      if (slots <= 0) break;
+      const claimed = claimTask(task.id, 'server');
+      if (!claimed) continue;
+
+      try {
+        await spawnWorker(task);
+        slots--;
+      } catch (err) {
+        console.error(`[promotePending] Failed to spawn worker for ${task.id}:`, err.message);
+        releaseTaskClaim(task.id);
+        updateTask(task.id, { status: 'failed', error: `Spawn failed: ${err.message}` });
+      }
+    }
+  } finally {
+    _promoting = false;
   }
 }
 
@@ -341,6 +349,7 @@ async function spawnWorker(task) {
     try {
       createSession(tmuxSession, fullCommand, worktreePath);
     } catch (err) {
+      cleanupWorktree(taskId, worktreePath);
       throw new Error(`tmux session creation failed: ${err.message}`);
     }
 
@@ -446,6 +455,7 @@ async function spawnWorker(task) {
     releaseTaskClaim(taskId);
     removeWorker(taskId);
     removeToken(taskId);
+    cleanupWorktree(taskId, worktreePath);
   });
 
   const pid = child.pid;
@@ -519,6 +529,10 @@ async function spawnWorker(task) {
 // Core: handleTmuxWorkerExit
 // ---------------------------------------------------------------------------
 async function handleTmuxWorkerExit(taskId, output) {
+  // Idempotency guard — both capture loop and exit-check loop can trigger this
+  if (HANDLED_EXITS.has(taskId)) return;
+  HANDLED_EXITS.add(taskId);
+
   logEvent(taskId, 'claude_exited', 'tmux session ended');
 
   const task = getTask(taskId);
@@ -547,7 +561,8 @@ async function handleTmuxWorkerExit(taskId, output) {
     // Commit changes
     try {
       gitExec(['add', '-A'], { cwd: worktreePath });
-      gitExec(['commit', '-m', 'Task work', '--allow-empty'], { cwd: worktreePath });
+      const commitMsg = `wf: ${(task.prompt || 'Task work').slice(0, 72)}`;
+      gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
     } catch { /* may already be committed */ }
 
     updateTask(taskId, {
@@ -658,7 +673,8 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
   if (exitCode === 0 && filesChanged) {
     try {
       gitExec(['add', '-A'], { cwd: worktreePath });
-      gitExec(['commit', '-m', 'Task work', '--allow-empty'], { cwd: worktreePath });
+      const commitMsg = `wf: ${(task.prompt || 'Task work').slice(0, 72)}`;
+      gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
     } catch { /* may already be committed */ }
 
     if (freshTask.autoMerge) {
@@ -768,6 +784,19 @@ async function mergeWorktree(task) {
   try {
     // 2. Merge
     logEvent(taskId, 'merge_started');
+    // Ensure we're on the default branch before merging
+    let defaultBranch = 'main';
+    try {
+      defaultBranch = gitExec(['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], { cwd: repoRoot }).replace('origin/', '');
+    } catch {
+      // Fallback: check if 'main' exists, else try 'master'
+      try {
+        gitExec(['rev-parse', '--verify', 'main'], { cwd: repoRoot });
+      } catch {
+        defaultBranch = 'master';
+      }
+    }
+    gitExec(['checkout', defaultBranch], { cwd: repoRoot });
     gitExec(['merge', '--no-ff', branchName], { cwd: repoRoot });
 
     // 4. Update task

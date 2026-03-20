@@ -3,7 +3,7 @@
 /**
  * Workforce MCP Server — stdio transport.
  *
- * Exposes 35 tools for managing autonomous Claude Code agent sessions.
+ * Exposes 36 tools for managing autonomous Claude Code agent sessions.
  * Replaces the Express+WebSocket backend with a single MCP server process.
  */
 
@@ -12,7 +12,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 // Core modules
-import { getDb, getBudget, setBudget, getCostForPeriod } from './core/db.js';
+import { getDb, getBudget, setBudget, getCostForPeriod, getRunningTasks } from './core/db.js';
+import { killSession } from './core/tmux.js';
 import { loadCostModel } from './core/cost-model.js';
 import { loadProfiles } from './core/profiles.js';
 import { startRecoveryEngine, setProjectDir as setRecoveryProjectDir } from './core/recovery-engine.js';
@@ -104,7 +105,7 @@ function wrapFormatted(handler) {
 server.tool(
   'workforce_create_task',
   'Create a new autonomous agent task. Spawns Claude CLI in an isolated git worktree.',
-  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), profile: z.string().optional().describe('Agent profile (default/interactive)'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)') },
+  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), profile: z.string().optional().describe('Agent profile (default/interactive)'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)'), depends_on: z.array(z.string()).optional().describe('Array of task IDs this task depends on'), group: z.string().optional().describe('Task group ID for dependency chains'), phase: z.number().optional().describe('Execution phase number'), parent_id: z.string().optional().describe('Parent task ID') },
   wrap(createTaskHandler),
 );
 
@@ -181,6 +182,13 @@ server.tool(
   wrap(resumeTaskHandler),
 );
 
+server.tool(
+  'workforce_analyze_prompt',
+  'Analyze a task prompt for admission quality, complexity, and estimated cost.',
+  { prompt: z.string().describe('Task prompt to analyze') },
+  wrap(analyzePromptHandler),
+);
+
 // ---------------------------------------------------------------------------
 // Change Review Tools
 // ---------------------------------------------------------------------------
@@ -236,6 +244,13 @@ server.tool(
   'Remove an item from the backlog.',
   { id: z.string().describe('Item ID to delete') },
   wrap(backlogDeleteHandler),
+);
+
+server.tool(
+  'workforce_backlog_reorder',
+  'Reorder backlog items by providing an ordered array of item IDs.',
+  { order: z.array(z.string()).describe('Ordered array of backlog item IDs') },
+  wrap(backlogReorderHandler),
 );
 
 // ---------------------------------------------------------------------------
@@ -512,21 +527,28 @@ async function main() {
 }
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+function gracefulShutdown() {
   console.error('[workforce] Shutting down...');
   if (stopRecovery) stopRecovery();
   if (stopCostWatchdog) stopCostWatchdog();
   stopWorkerManager();
+  // Kill running tasks to prevent orphaned processes
+  try {
+    const running = getRunningTasks();
+    for (const task of running) {
+      if (task.tmuxSession) {
+        try { killSession(task.tmuxSession); } catch { /* ignore */ }
+      }
+      if (task.pid) {
+        try { process.kill(task.pid, 'SIGTERM'); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore cleanup errors */ }
   process.exit(0);
-});
+}
 
-process.on('SIGINT', () => {
-  console.error('[workforce] Shutting down...');
-  if (stopRecovery) stopRecovery();
-  if (stopCostWatchdog) stopCostWatchdog();
-  stopWorkerManager();
-  process.exit(0);
-});
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 main().catch(err => {
   console.error('[workforce] Fatal error:', err);
