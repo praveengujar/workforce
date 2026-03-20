@@ -17,6 +17,7 @@ export function healthMetricsHandler() {
 
   const done = allTasks.filter(t => t.status === 'done' || t.status === 'archived').length;
   const failed = allTasks.filter(t => t.status === 'failed').length;
+  const rejected = allTasks.filter(t => t.status === 'rejected').length;
   const retried = allTasks.filter(t => t.retryCount > 0).length;
   const oneShot = allTasks.filter(
     t => (t.status === 'done' || t.status === 'archived') && t.retryCount === 0,
@@ -41,6 +42,8 @@ export function healthMetricsHandler() {
     failRate: Math.round(failRate * 100) / 100,
     retryRate: Math.round(retryRate * 100) / 100,
     oneShotRate: Math.round(oneShotRate * 100) / 100,
+    rejected,
+    rejectRate: total > 0 ? Math.round((rejected / total) * 100) / 100 : 0,
     uptime: process.uptime(),
     recentTasks,
     total,

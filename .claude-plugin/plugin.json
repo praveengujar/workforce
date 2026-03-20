@@ -1,13 +1,20 @@
 {
   "name": "workforce",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Control plane for managing autonomous Claude Code agent sessions. Spawns tasks in isolated git worktrees, manages lifecycle, auto-merges, and tracks costs.",
   "author": {
     "name": "Praveen Gujar"
   },
   "repository": "https://github.com/praveengujar/workforce",
   "license": "MIT",
-  "keywords": ["agents", "workforce", "task-management", "automation", "worktree", "mcp"],
+  "keywords": [
+    "agents",
+    "workforce",
+    "task-management",
+    "automation",
+    "worktree",
+    "mcp"
+  ],
   "skills": "./skills/",
   "agents": [
     "./agents/task-planner.md",
@@ -15,7 +22,8 @@
     "./agents/experiment-researcher.md",
     "./agents/failure-forensics.md",
     "./agents/release-manager.md",
-    "./agents/qa-engineer.md"
+    "./agents/qa-engineer.md",
+    "./agents/requirements-analyst.md"
   ],
   "mcpServers": "./.mcp.json"
 }

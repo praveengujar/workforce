@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -49,6 +50,11 @@ export async function createTaskHandler({ prompt, project, profile, autoMerge, p
   if (depends_on && depends_on.length > 0) extras.dependsOn = JSON.stringify(depends_on);
   if (group) extras.taskGroup = group;
   if (phase != null) extras.phase = phase;
+  // Record current branch as merge target
+  try {
+    const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { stdio: 'pipe' }).toString().trim();
+    extras.targetBranch = currentBranch;
+  } catch { /* ignore — targetBranch stays null */ }
   if (Object.keys(extras).length > 0) {
     task = updateTask(id, extras);
   }
@@ -68,6 +74,27 @@ export async function createTaskHandler({ prompt, project, profile, autoMerge, p
       if (err.message.includes('cycle detected')) throw err;
       // Non-fatal cycle check error — continue
     }
+  }
+
+  // Enforce cost policy
+  try {
+    const { evaluateTaskCost } = await import('./cost-approval.js');
+    const { estimateTaskCost: estimateCost } = await import('../core/task-cost.js');
+    const { getCostForPeriod: getCost } = await import('../core/db.js');
+    const estimate = estimateCost(prompt);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+    const dailySpend = getCost('global', startOfToday, endOfDay);
+    const evaluation = evaluateTaskCost(estimate.totalCost, dailySpend);
+    if (evaluation.decision === 'rejected') {
+      const { deleteTask: delTask } = await import('../core/db.js');
+      delTask(id);
+      throw new Error(`Cost policy rejected: ${evaluation.reason}`);
+    }
+  } catch (err) {
+    if (err.message.includes('Cost policy rejected')) throw err;
+    // Non-fatal cost policy error — continue
   }
 
   logEvent(id, 'task_created');

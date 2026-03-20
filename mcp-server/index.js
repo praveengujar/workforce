@@ -71,7 +71,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 const server = new McpServer({
   name: 'workforce',
-  version: '1.1.0',
+  version: '1.2.0',
 });
 
 // Helper: wrap handler so errors become tool error results instead of crashes
@@ -202,15 +202,15 @@ server.tool(
 
 server.tool(
   'workforce_approve_task',
-  'Approve a task in review status — merges its branch to main.',
-  { task_id: z.string().describe('Task ID to approve') },
+  'Approve a task in review status — merges its branch to the target branch.',
+  { task_id: z.string().describe('Task ID to approve'), reason: z.string().optional().describe('Approval rationale') },
   wrap(approveTaskHandler),
 );
 
 server.tool(
   'workforce_reject_task',
-  'Reject a task in review status — discards changes and cleans up worktree.',
-  { task_id: z.string().describe('Task ID to reject') },
+  'Reject a task in review status — marks as rejected and cleans up worktree.',
+  { task_id: z.string().describe('Task ID to reject'), reason: z.string().optional().describe('Rejection reason') },
   wrap(rejectTaskHandler),
 );
 

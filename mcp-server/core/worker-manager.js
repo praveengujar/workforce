@@ -784,10 +784,16 @@ async function mergeWorktree(task) {
   try {
     // 2. Merge
     logEvent(taskId, 'merge_started');
+    // Use recorded target branch, falling back to current branch
+    const targetBranch = task.targetBranch || gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
     // Safeguard: refuse to merge into main/master to prevent accidental commits
+    if (targetBranch === 'main' || targetBranch === 'master') {
+      throw new Error(`Refusing to merge into protected branch "${targetBranch}". Checkout a feature branch first.`);
+    }
+    // Ensure we're on the target branch
     const currentBranch = gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
-    if (currentBranch === 'main' || currentBranch === 'master') {
-      throw new Error(`Refusing to merge into protected branch "${currentBranch}". Checkout a feature branch first.`);
+    if (currentBranch !== targetBranch) {
+      gitExec(['checkout', targetBranch], { cwd: repoRoot });
     }
     gitExec(['merge', '--no-ff', branchName], { cwd: repoRoot });
 

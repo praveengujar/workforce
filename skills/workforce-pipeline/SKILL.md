@@ -1,0 +1,86 @@
+---
+name: workforce-pipeline
+description: Run the full orchestration pipeline for a task — rubberduck, launch, test plan, QA, human review, merge. Use when you want the complete quality flow from prompt to merge.
+---
+
+When the user invokes /workforce-pipeline, orchestrate a complete task lifecycle with quality gates.
+
+## Pipeline Stages
+
+```
+rubberduck → launch → [agent codes] → test plan → QA → human review → merge
+```
+
+Each stage is optional and skippable. The pipeline adapts based on task complexity.
+
+## Steps
+
+### Stage 1: Rubberduck (skip for simple/○ tasks)
+1. Run the rubberduck analysis (same as /workforce-rubberduck)
+2. Present refined prompt and acceptance criteria
+3. On approval, proceed to launch
+
+### Stage 2: Launch
+1. Call `workforce_create_task` with the refined prompt
+2. Show the launch card
+3. Wait for task to complete (move to `review` status)
+4. Periodically check status via `workforce_get_task`
+
+### Stage 3: Test Plan (skip for non-UI/non-API tasks)
+1. Once task is in `review`, run test plan analysis (same as /workforce-test-plan)
+2. Present the test plan
+3. On approval, proceed to QA
+
+### Stage 4: QA (skip if no testable behaviors)
+1. Create QA task(s) based on the test plan (same as /workforce-qa)
+2. QA tasks auto-launch since `review` satisfies dependencies
+3. Wait for QA task(s) to complete
+4. Report QA results
+
+### Stage 5: Human Review
+1. Show the diff via `workforce_get_diff`
+2. Show QA results (if QA was run)
+3. Show the test plan checklist (if generated)
+4. Ask for human decision: approve or reject (with reason)
+
+### Stage 6: Merge (on approve)
+1. Call `workforce_approve_task` with the approval reason
+2. Report merge result (success, conflict, or failure)
+3. If merge fails, offer to create a fix-up task
+
+## Template — Pipeline Status
+
+```
+━━━ PIPELINE: {id_8} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Prompt: "{prompt_40}..."
+
+  ✓ Rubberduck    Refined prompt, 4 acceptance criteria
+  ✓ Launch        Task running (slot 2/10)
+  ● Code          Agent working... {elapsed}
+  ○ Test Plan     Waiting for code completion
+  ○ QA            Waiting for test plan
+  ○ Review        Waiting for QA
+  ○ Merge         Waiting for approval
+```
+
+Update this status card as each stage completes.
+
+## Adaptive Behavior
+
+- **Simple tasks (○ tier, <$0.10)**: Skip rubberduck and test plan. Launch → Review → Merge.
+- **Medium tasks (● tier, $0.10-$0.50)**: Skip rubberduck. Launch → Test Plan → QA → Review → Merge.
+- **Complex tasks (◉ tier, >$0.50)**: Full pipeline. Rubberduck → Launch → Test Plan → QA → Review → Merge.
+- **User override**: "skip QA", "skip rubberduck" — honor immediately.
+
+## Error Handling
+
+- If code stage fails: offer /workforce-rescue for diagnosis
+- If QA fails: show QA output, offer to fix and re-run
+- If merge fails: show conflict details, offer fix-up task
+- If human rejects: show rejection reason, offer to create retry task with feedback incorporated
+
+## Conversation Style
+
+- Don't ask permission at every stage — execute the appropriate pipeline and pause only at decision points (approve/reject)
+- Show the pipeline status card after each stage transition
+- If the user is watching, provide brief updates. If async, summarize at the end.

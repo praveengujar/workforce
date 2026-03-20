@@ -28,7 +28,7 @@ export function resolveDependencies(taskId) {
   for (const depId of deps) {
     const dep = getTask(depId);
     if (!dep) { failed.push(depId); continue; }
-    if (dep.status === 'done' || dep.status === 'archived') { done.push(depId); }
+    if (dep.status === 'done' || dep.status === 'archived' || dep.status === 'review') { done.push(depId); }
     else if (dep.status === 'failed') { failed.push(depId); }
     else { pending.push(depId); }
   }

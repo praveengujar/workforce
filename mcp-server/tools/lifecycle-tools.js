@@ -36,8 +36,9 @@ export function getDiffHandler({ task_id }) {
   let additions = 0;
   let deletions = 0;
 
+  const baseBranch = task.targetBranch || 'main';
   try {
-    diff = gitExec(['diff', `main...${branchName}`], { cwd: repoRoot });
+    diff = gitExec(['diff', `${baseBranch}...${branchName}`], { cwd: repoRoot });
   } catch {
     try {
       diff = gitExec(['diff', `HEAD...${branchName}`], { cwd: repoRoot });
@@ -47,7 +48,7 @@ export function getDiffHandler({ task_id }) {
   }
 
   try {
-    const stat = gitExec(['diff', '--stat', `main...${branchName}`], { cwd: repoRoot });
+    const stat = gitExec(['diff', '--stat', `${baseBranch}...${branchName}`], { cwd: repoRoot });
     const lines = stat.split('\n');
     for (const line of lines) {
       const fileMatch = line.match(/^\s*(.+?)\s+\|\s+(\d+)/);
@@ -67,26 +68,36 @@ export function getDiffHandler({ task_id }) {
 // ---------------------------------------------------------------------------
 // approveTaskHandler
 // ---------------------------------------------------------------------------
-export async function approveTaskHandler({ task_id }) {
+export async function approveTaskHandler({ task_id, reason }) {
   const task = getTask(task_id);
   if (!task) throw new Error('task not found');
   if (task.status !== 'review') throw new Error('task is not in review status');
 
+  if (reason) {
+    logEvent(task.id, 'approval_reason', reason);
+  }
+
   await mergeWorktree(task);
-  return { ok: true };
+
+  // Check if merge actually succeeded
+  const freshTask = getTask(task_id);
+  if (freshTask.status === 'failed' || freshTask.mergeFailed) {
+    return { ok: false, merged: false, error: freshTask.error || 'Merge failed' };
+  }
+  return { ok: true, merged: true };
 }
 
 // ---------------------------------------------------------------------------
 // rejectTaskHandler
 // ---------------------------------------------------------------------------
-export function rejectTaskHandler({ task_id }) {
+export function rejectTaskHandler({ task_id, reason }) {
   const task = getTask(task_id);
   if (!task) throw new Error('task not found');
   if (task.status !== 'review') throw new Error('task is not in review status');
 
   updateTask(task.id, {
-    status: 'failed',
-    error: 'Changes rejected by user',
+    status: 'rejected',
+    error: reason || 'Changes rejected by user',
     completedAt: new Date().toISOString(),
   });
   logEvent(task.id, 'rejected', 'User rejected changes');

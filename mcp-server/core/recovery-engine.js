@@ -124,7 +124,7 @@ export function runRecoveryScan() {
   const repairs = [];
 
   for (const task of tasks) {
-    if (task.status === 'done' || task.status === 'archived' || task.status === 'pending') continue;
+    if (task.status === 'done' || task.status === 'archived' || task.status === 'pending' || task.status === 'rejected') continue;
 
     if (rule0aZombieRetry(task)) { repairs.push({ taskId: task.id, rule: '0a', action: 'zombie_retry_failed' }); continue; }
     if (rule0bStuckMerge(task)) { repairs.push({ taskId: task.id, rule: '0b', action: 'stuck_merge_resolved' }); continue; }

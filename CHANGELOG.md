@@ -3,6 +3,29 @@
 All notable changes to the Workforce plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-03-20
+
+### Added
+- `/workforce-pipeline` skill — full orchestration: rubberduck → launch → test plan → QA → review → merge
+- `/workforce-rubberduck` skill — prompt analysis, risk assessment, acceptance criteria
+- `/workforce-test-plan` skill — structured test plan generation for tasks in review
+- `/workforce-gate-status` skill — quality gate status reporting before approval
+- `requirements-analyst` agent — deep-dive codebase analysis for complex task requirements
+- `targetBranch` field on tasks — records the branch at creation time for correct merge target and diffs
+- `rejected` terminal status — human rejections separated from runtime failures
+- `reason` parameter on approve/reject tools — audit trail for decisions
+- Cost policy enforcement in `createTaskHandler` — server-side gate, not just skill convention
+- Reject rate and rejected count in health metrics
+
+### Fixed
+- QA dependency deadlock: `review` status now satisfies dependencies, allowing QA tasks to launch
+- Approve handler returns structured result `{ ok, merged, error }` instead of unconditional `{ ok: true }`
+- Merge uses recorded `targetBranch` instead of assuming current branch
+- Diff compares against `targetBranch` instead of hardcoded `main`
+- Merge safeguard blocks `main`/`master` as target (must use feature branch)
+- Recovery engine skips `rejected` tasks
+- Default task listing excludes `rejected` alongside `archived`
+
 ## [1.1.0] - 2026-03-20
 
 ### Added

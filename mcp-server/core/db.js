@@ -214,6 +214,16 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(6, new Date().toISOString());
     console.error('[db] Applied migration 6: retryAfter column');
   }
+
+  // Migration 7: targetBranch for merge target tracking
+  const m7 = db.prepare('SELECT version FROM schema_migrations WHERE version = 7').get();
+  if (!m7) {
+    try {
+      db.exec("ALTER TABLE tasks ADD COLUMN targetBranch TEXT");
+    } catch { /* column may already exist */ }
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(7, new Date().toISOString());
+    console.error('[db] Applied migration 7: targetBranch column');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +234,7 @@ export function getAllTasks(includeArchived = false) {
   if (includeArchived) {
     return stmt('SELECT * FROM tasks ORDER BY createdAt DESC').all();
   }
-  return stmt("SELECT * FROM tasks WHERE status != 'archived' ORDER BY createdAt DESC").all();
+  return stmt("SELECT * FROM tasks WHERE status NOT IN ('archived', 'rejected') ORDER BY createdAt DESC").all();
 }
 
 export function getTask(id) {
@@ -246,7 +256,7 @@ const TASK_COLUMNS = new Set([
   'createdAt', 'startedAt', 'completedAt', 'archivedAt',
   'tmuxSession', 'autoMerge', 'profile',
   'taskType', 'experimentConfig',
-  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter',
+  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter', 'targetBranch',
 ]);
 
 export function updateTask(id, updates) {
