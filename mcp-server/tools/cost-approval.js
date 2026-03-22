@@ -5,9 +5,7 @@
 
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+import { DATA_DIR } from '../core/constants.js';
 const CONFIG_PATH = join(DATA_DIR, 'cost-policy.json');
 
 const DEFAULT_POLICY = {

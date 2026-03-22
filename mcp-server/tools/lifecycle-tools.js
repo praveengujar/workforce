@@ -3,10 +3,10 @@
  * Pure functions, no Express dependency. Uses execFileSync for git safety.
  */
 
-import { execFileSync } from 'node:child_process';
 import { getTask, updateTask } from '../core/db.js';
 import { logEvent } from '../core/task-events.js';
 import { mergeWorktree, cleanupWorktree } from '../core/worker-manager.js';
+import { gitExec } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Module-level project dir — set once at startup via setProjectDir()
@@ -15,10 +15,6 @@ let _projectDir = process.cwd();
 
 export function setProjectDir(dir) {
   _projectDir = dir;
-}
-
-function gitExec(args, options = {}) {
-  return execFileSync('git', args, { stdio: 'pipe', ...options }).toString().trim();
 }
 
 // ---------------------------------------------------------------------------

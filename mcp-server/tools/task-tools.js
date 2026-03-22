@@ -5,12 +5,12 @@
 
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import {
   getAllTasks, getTask, createTask as dbCreateTask, updateTask,
   getRunningTasks, releaseTaskClaim, removeWorker,
+  deleteTask, getCostForPeriod,
 } from '../core/db.js';
 import { detectCycles } from '../core/dependency-resolver.js';
 import { logEvent, getTaskTimeline } from '../core/task-events.js';
@@ -18,12 +18,8 @@ import { cancelTask as cancelTaskToken } from '../core/project-state.js';
 import { promotePending, cleanupWorktree } from '../core/worker-manager.js';
 import { isTmuxAvailable, hasSession, sendKeys, capturePane } from '../core/tmux.js';
 import { estimateTaskCost } from '../core/task-cost.js';
-
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
-
-function ensureDir(dir) {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
+import { evaluateTaskCost } from './cost-approval.js';
+import { DATA_DIR, ensureDir } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // createTaskHandler
@@ -65,7 +61,6 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
       const cycle = detectCycles(allTasks);
       if (cycle) {
         // Roll back: delete the task we just created
-        const { deleteTask } = await import('../core/db.js');
         deleteTask(id);
         throw new Error(`Dependency cycle detected: ${cycle.map(c => c.slice(0, 8)).join(' -> ')}`);
       }
@@ -77,18 +72,14 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
 
   // Enforce cost policy
   try {
-    const { evaluateTaskCost } = await import('./cost-approval.js');
-    const { estimateTaskCost: estimateCost } = await import('../core/task-cost.js');
-    const { getCostForPeriod: getCost } = await import('../core/db.js');
-    const estimate = estimateCost(prompt);
+    const estimate = estimateTaskCost(prompt);
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-    const dailySpend = getCost('global', startOfToday, endOfDay);
+    const dailySpend = getCostForPeriod('global', startOfToday, endOfDay);
     const evaluation = evaluateTaskCost(estimate.totalCost, dailySpend);
     if (evaluation.decision === 'rejected') {
-      const { deleteTask: delTask } = await import('../core/db.js');
-      delTask(id);
+      deleteTask(id);
       throw new Error(`Cost policy rejected: ${evaluation.reason}`);
     }
   } catch (err) {

@@ -2,11 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-
-// ---------------------------------------------------------------------------
-// Path & directory setup — uses WORKFORCE_DATA_DIR (plugin persistent data)
-// ---------------------------------------------------------------------------
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+import { DATA_DIR } from './constants.js';
 const DB_PATH = join(DATA_DIR, 'workforce.db');
 const LEGACY_DB_PATH = join(homedir(), '.claude', 'tasks', 'claude-agents.db');
 

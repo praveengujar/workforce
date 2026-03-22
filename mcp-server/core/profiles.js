@@ -1,8 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+import { DATA_DIR } from './constants.js';
 const PROFILES_PATH = join(DATA_DIR, 'profiles.json');
 
 let _profiles = null;

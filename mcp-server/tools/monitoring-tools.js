@@ -5,8 +5,8 @@
 
 import { getAllTasks } from '../core/db.js';
 import { classifyTier } from '../core/cost-model.js';
-import { listProfiles } from '../core/profiles.js';
 import { runRecoveryScan } from '../core/recovery-engine.js';
+import { getDateBoundaries } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // healthMetricsHandler
@@ -56,11 +56,7 @@ export function healthMetricsHandler() {
 // ---------------------------------------------------------------------------
 export function costSummaryHandler() {
   const allTasks = getAllTasks(true);
-  const now = new Date();
-
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const { startOfToday, startOfWeek, startOfMonth } = getDateBoundaries();
 
   let today = 0;
   let thisWeek = 0;
@@ -90,33 +86,6 @@ export function costSummaryHandler() {
       complex: Math.round(byTier.complex * 100) / 100,
     },
   };
-}
-
-// ---------------------------------------------------------------------------
-// listProjectsHandler
-// ---------------------------------------------------------------------------
-export function listProjectsHandler() {
-  const allTasks = getAllTasks(true);
-  const projectMap = new Map();
-
-  for (const task of allTasks) {
-    const name = task.project || '(no project)';
-    if (!projectMap.has(name)) {
-      projectMap.set(name, { name, taskCount: 0, statusBreakdown: {} });
-    }
-    const proj = projectMap.get(name);
-    proj.taskCount++;
-    proj.statusBreakdown[task.status] = (proj.statusBreakdown[task.status] || 0) + 1;
-  }
-
-  return [...projectMap.values()];
-}
-
-// ---------------------------------------------------------------------------
-// listProfilesHandler
-// ---------------------------------------------------------------------------
-export function listProfilesHandler() {
-  return listProfiles();
 }
 
 // ---------------------------------------------------------------------------

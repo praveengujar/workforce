@@ -21,6 +21,7 @@ import {
   saveCostPolicy,
   getDefaultPolicy,
 } from './cost-approval.js';
+import { getDateBoundaries } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // setBudgetHandler
@@ -89,14 +90,12 @@ export function getBudgetHandler({ scope }) {
     };
   }
 
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const { startOfToday, startOfWeek, startOfMonth, endOfDay } = getDateBoundaries();
+  const now = new Date().toISOString();
 
-  const dailySpend = getCostForPeriod(budgetScope, startOfToday, now.toISOString());
-  const weeklySpend = getCostForPeriod(budgetScope, startOfWeek, now.toISOString());
-  const monthlySpend = getCostForPeriod(budgetScope, startOfMonth, now.toISOString());
+  const dailySpend = getCostForPeriod(budgetScope, startOfToday, now);
+  const weeklySpend = getCostForPeriod(budgetScope, startOfWeek, now);
+  const monthlySpend = getCostForPeriod(budgetScope, startOfMonth, now);
 
   // Build formatted output
   const lines = [];

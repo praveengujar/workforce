@@ -5,11 +5,9 @@
  * cost log at ~/.claude/tasks/cost-log.jsonl for historical analysis.
  */
 
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+import { DATA_DIR, ensureDir } from './constants.js';
 const COST_LOG_PATH = join(DATA_DIR, 'cost-log.jsonl');
 
 /**
@@ -49,7 +47,7 @@ export function parseDetailedCost(output) {
  * @param {{ taskId: string, project?: string, cost?: number, tier?: string, inputTokens?: number, outputTokens?: number }} entry
  */
 export function appendCostLog(entry) {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  ensureDir(DATA_DIR);
   const line = JSON.stringify({
     ...entry,
     timestamp: new Date().toISOString(),

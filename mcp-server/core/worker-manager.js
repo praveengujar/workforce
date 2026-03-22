@@ -8,15 +8,14 @@
  * No Express, no WebSocket — pure lifecycle logic.
  */
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
-  mkdirSync,
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { DATA_DIR, ensureDir, gitExec, CLAUDE_CLI } from './constants.js';
 
 import {
   getAllTasks,
@@ -63,15 +62,9 @@ let PROJECT_DIR = null;
 let _promoteInterval = null;
 let _promoting = false;
 
-const TASKS_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function ensureDir(dir) {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
 function extractTaskOutput(stdout) {
   if (!stdout) return '';
   const trimmed = stdout.trim();
@@ -84,29 +77,73 @@ function extractSessionId(stderr) {
   return match ? match[1] : null;
 }
 
-function gitExec(args, options = {}) {
-  return execFileSync('git', args, { stdio: 'pipe', ...options }).toString().trim();
-}
-
-function findClaudeCli() {
-  const explicit = process.env.CLAUDE_CLI;
-  if (explicit) return explicit;
-
-  const candidates = [
-    join(homedir(), '.local', 'bin', 'claude'),
-    join(homedir(), 'bin', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-  ];
-
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+/**
+ * Check whether any files changed in a worktree relative to a base commit.
+ * Shared by both tmux and child_process exit handlers.
+ */
+function checkFilesChanged(worktreePath, baseCommit) {
+  if (!worktreePath) return false;
+  try {
+    const compareRef = baseCommit || 'HEAD';
+    const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
+    if (diff.length > 0) return true;
+    const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
+    return parseInt(logCount, 10) > 0;
+  } catch {
+    try {
+      const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
+      return untracked.length > 0;
+    } catch {
+      return false;
+    }
   }
-
-  return 'claude';
 }
 
-const CLAUDE_CLI = findClaudeCli();
+/**
+ * Record actual cost from Claude CLI output. Shared by both exit handlers.
+ */
+function recordTaskCost(taskId, task, outputText) {
+  try {
+    const detailed = parseDetailedCost(outputText || '');
+    const actualCost = detailed.cost;
+    if (actualCost && actualCost > 0) {
+      recordActualCost(task.prompt, actualCost);
+      updateTask(taskId, { cost: actualCost });
+      const tier = classifyTier(task.prompt || '');
+      recordCost(taskId, task.project, actualCost, tier);
+      appendCostLog({
+        taskId, project: task.project || null, cost: actualCost, tier,
+        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+      });
+    }
+  } catch { /* ignore cost parsing errors */ }
+}
+
+/**
+ * Extract a short result summary from Claude CLI output. Shared by both exit handlers.
+ */
+function extractResultSummary(taskId, outputText) {
+  try {
+    const summaryPatterns = [
+      /Result:\s*(.+)/i,
+      /Summary:\s*(.+)/i,
+      /Done:\s*(.+)/i,
+      /Created:\s*(.+)/i,
+    ];
+    let summary = null;
+    for (const pattern of summaryPatterns) {
+      const match = outputText.match(pattern);
+      if (match) { summary = match[1].trim().slice(0, 500); break; }
+    }
+    if (!summary) {
+      const lines = outputText.trim().split('\n').filter(l => l.trim().length > 10);
+      summary = lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 500) : null;
+    }
+    if (summary) {
+      updateTask(taskId, { resultSummary: summary });
+    }
+  } catch { /* ignore */ }
+}
 
 // ---------------------------------------------------------------------------
 // Core: promotePending
@@ -300,7 +337,7 @@ async function spawnWorker(task) {
 
   // Add feedback examples if available
   try {
-    const feedbackPath = join(TASKS_DIR, 'feedback.jsonl');
+    const feedbackPath = join(DATA_DIR, 'feedback.jsonl');
     if (existsSync(feedbackPath)) {
       const lines = readFileSync(feedbackPath, 'utf8').trim().split('\n').filter(Boolean);
       const recent = lines.slice(-5);
@@ -353,8 +390,8 @@ async function spawnWorker(task) {
   }
 
   // 3. Spawn Claude CLI
-  ensureDir(TASKS_DIR);
-  const logPath = join(TASKS_DIR, `${taskId}.log`);
+  ensureDir(DATA_DIR);
+  const logPath = join(DATA_DIR, `${taskId}.log`);
 
   const useTmux = isTmuxAvailable();
   const tmuxSession = `wf-${taskId.slice(0, 8)}`;
@@ -389,12 +426,18 @@ async function spawnWorker(task) {
 
     logEvent(taskId, 'task_started', `tmux=${tmuxSession} pid=${pid}`);
 
+    // Declare all timer variables upfront so every callback can clean up all of them
+    let captureInterval, exitCheckInterval, timeoutTimer, nudgeTimer;
+
     // Start output capture loop — poll tmux pane every 2 seconds
     let lastCaptureLength = 0;
-    const captureInterval = setInterval(() => {
+    captureInterval = setInterval(() => {
       try {
         if (!hasSession(tmuxSession)) {
           clearInterval(captureInterval);
+          clearInterval(exitCheckInterval);
+          clearTimeout(timeoutTimer);
+          clearTimeout(nudgeTimer);
           const finalOutput = capturePane(tmuxSession);
           handleTmuxWorkerExit(taskId, finalOutput);
           return;
@@ -412,7 +455,7 @@ async function spawnWorker(task) {
     }, 2000);
 
     // Timeout watchdog
-    const timeoutTimer = setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       console.error(`[spawnWorker] Task ${taskId} timed out — killing tmux session`);
       logEvent(taskId, 'timeout', `Killed after ${TASK_TIMEOUT / 1000}s`);
       killSession(tmuxSession);
@@ -420,12 +463,12 @@ async function spawnWorker(task) {
     }, TASK_TIMEOUT);
 
     // Stuck nudge
-    const nudgeTimer = setTimeout(() => {
+    nudgeTimer = setTimeout(() => {
       logEvent(taskId, 'stuck_warning', `Running for ${STUCK_NUDGE / 1000}s`);
     }, STUCK_NUDGE);
 
     // Check for session end every 3 seconds
-    const exitCheckInterval = setInterval(async () => {
+    exitCheckInterval = setInterval(async () => {
       if (!hasSession(tmuxSession) || !isSessionAlive(tmuxSession)) {
         clearInterval(exitCheckInterval);
         clearInterval(captureInterval);
@@ -496,17 +539,17 @@ async function spawnWorker(task) {
   logEvent(taskId, 'task_started', `pid=${pid}`);
   logEvent(taskId, 'claude_pid_assigned', `pid=${pid}`);
 
-  // Collect stdout/stderr
-  let stdout = '';
-  let stderr = '';
+  // Collect stdout/stderr as Buffer arrays — avoids O(n^2) string concatenation
+  const stdoutChunks = [];
+  const stderrChunks = [];
 
   child.stdout.on('data', (chunk) => {
-    stdout += chunk.toString();
+    stdoutChunks.push(chunk);
     appendFileAsync(logPath, chunk).catch(() => {});
   });
 
   child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
+    stderrChunks.push(chunk);
     appendFileAsync(logPath, chunk).catch(() => {});
   });
 
@@ -531,6 +574,8 @@ async function spawnWorker(task) {
   child.on('close', async (code) => {
     clearTimeout(timeoutTimer);
     clearTimeout(nudgeTimer);
+    const stdout = Buffer.concat(stdoutChunks).toString();
+    const stderr = Buffer.concat(stderrChunks).toString();
     await handleWorkerExit(task, code, stdout, stderr);
   });
 
@@ -562,27 +607,7 @@ async function handleTmuxWorkerExit(taskId, output) {
   const cleanOutput = (output || '').slice(-4000);
 
   // Check for file changes — compare against base commit, not HEAD
-  // (HEAD moves if the agent commits during its run)
-  let filesChanged = false;
-  if (worktreePath) {
-    try {
-      const compareRef = task.baseCommit || 'HEAD';
-      const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
-      filesChanged = diff.length > 0;
-      if (!filesChanged) {
-        // Also check for commits beyond the base
-        const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
-        filesChanged = parseInt(logCount, 10) > 0;
-      }
-    } catch {
-      try {
-        const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
-        filesChanged = untracked.length > 0;
-      } catch {
-        filesChanged = false;
-      }
-    }
-  }
+  const filesChanged = checkFilesChanged(worktreePath, task.baseCommit);
 
   if (filesChanged) {
     // Commit changes
@@ -610,51 +635,18 @@ async function handleTmuxWorkerExit(taskId, output) {
     cleanupWorktree(taskId, worktreePath);
   }
 
-  // Cost tracking — enhanced with token-level detail
-  try {
-    const detailed = parseDetailedCost(output || '');
-    const actualCost = detailed.cost;
-    if (actualCost && actualCost > 0) {
-      recordActualCost(task.prompt, actualCost);
-      updateTask(taskId, { cost: actualCost });
-      const tier = classifyTier(task.prompt || '');
-      recordCost(taskId, task.project, actualCost, tier);
-      appendCostLog({
-        taskId, project: task.project || null, cost: actualCost, tier,
-        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
-      });
-    }
-  } catch { /* ignore */ }
+  // Cost tracking
+  recordTaskCost(taskId, task, output || '');
 
   // Auto-extract result summary from output (only on success)
   const freshTaskTmux = getTask(taskId);
   if (freshTaskTmux && (freshTaskTmux.status === 'review' || freshTaskTmux.status === 'done')) {
-    try {
-      const outputText = cleanOutput || output || '';
-      const summaryPatterns = [
-        /Result:\s*(.+)/i,
-        /Summary:\s*(.+)/i,
-        /Done:\s*(.+)/i,
-        /Created:\s*(.+)/i,
-      ];
-      let summary = null;
-      for (const pattern of summaryPatterns) {
-        const match = outputText.match(pattern);
-        if (match) { summary = match[1].trim().slice(0, 500); break; }
-      }
-      // Fallback: last meaningful line
-      if (!summary) {
-        const lines = outputText.trim().split('\n').filter(l => l.trim().length > 10);
-        summary = lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 500) : null;
-      }
-      if (summary) {
-        updateTask(taskId, { resultSummary: summary });
-      }
-    } catch { /* ignore */ }
+    extractResultSummary(taskId, cleanOutput || output || '');
   }
 
   releaseTaskClaim(taskId);
   removeWorker(taskId);
+  HANDLED_EXITS.delete(taskId);
   removeToken(taskId);
 
   await promotePending();
@@ -678,30 +670,9 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
   }
 
   // 3. Zero-work guard: did any files change?
-  // Compare against base commit (not HEAD) because agent may have committed during its run
-  let filesChanged = false;
   const freshTask = getTask(taskId);
   const worktreePath = freshTask?.worktreePath;
-
-  if (worktreePath) {
-    try {
-      const compareRef = freshTask.baseCommit || 'HEAD';
-      const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
-      filesChanged = diff.length > 0;
-      if (!filesChanged) {
-        // Also check for commits beyond the base
-        const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
-        filesChanged = parseInt(logCount, 10) > 0;
-      }
-    } catch {
-      try {
-        const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
-        filesChanged = untracked.length > 0;
-      } catch {
-        filesChanged = false;
-      }
-    }
-  }
+  const filesChanged = checkFilesChanged(worktreePath, freshTask?.baseCommit);
 
   // 4 & 5. Decide outcome
   if (exitCode === 0 && filesChanged) {
@@ -738,49 +709,13 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
     cleanupWorktree(taskId, worktreePath);
   }
 
-  // 6. Record actual cost if available — enhanced with token-level detail
-  try {
-    const detailed = parseDetailedCost(stdout || '');
-    const actualCost = detailed.cost;
-    if (actualCost && actualCost > 0) {
-      recordActualCost(task.prompt, actualCost);
-      updateTask(taskId, { cost: actualCost });
-      const tier = classifyTier(task.prompt || '');
-      recordCost(taskId, task.project, actualCost, tier);
-      appendCostLog({
-        taskId: task.id, project: task.project || null, cost: actualCost, tier,
-        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
-      });
-    }
-  } catch {
-    // ignore cost parsing errors
-  }
+  // 6. Record actual cost if available
+  recordTaskCost(taskId, task, stdout || '');
 
   // Auto-extract result summary from output (only on success)
   const freshTaskAfterExit = getTask(taskId);
   if (freshTaskAfterExit && (freshTaskAfterExit.status === 'review' || freshTaskAfterExit.status === 'done')) {
-    try {
-      const outputText = output || stdout || '';
-      const summaryPatterns = [
-        /Result:\s*(.+)/i,
-        /Summary:\s*(.+)/i,
-        /Done:\s*(.+)/i,
-        /Created:\s*(.+)/i,
-      ];
-      let summary = null;
-      for (const pattern of summaryPatterns) {
-        const match = outputText.match(pattern);
-        if (match) { summary = match[1].trim().slice(0, 500); break; }
-      }
-      // Fallback: last meaningful line
-      if (!summary) {
-        const lines = outputText.trim().split('\n').filter(l => l.trim().length > 10);
-        summary = lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 500) : null;
-      }
-      if (summary) {
-        updateTask(taskId, { resultSummary: summary });
-      }
-    } catch { /* ignore */ }
+    extractResultSummary(taskId, output || stdout || '');
   }
 
   // 7. Release claim, remove worker
@@ -955,7 +890,7 @@ function initWorkerManager(projectDir) {
   PROJECT_DIR = projectDir;
   console.error(`[worker-manager] Initialized with project dir: ${PROJECT_DIR}`);
   console.error(`[worker-manager] Claude CLI: ${CLAUDE_CLI}`);
-  console.error(`[worker-manager] Tasks dir: ${TASKS_DIR}`);
+  console.error(`[worker-manager] Tasks dir: ${DATA_DIR}`);
   console.error(`[worker-manager] Max concurrent: ${MAX_CONCURRENT}`);
 
   // Start promote loop every 5 seconds

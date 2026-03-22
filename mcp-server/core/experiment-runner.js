@@ -18,11 +18,9 @@ import {
   writeFileSync,
   appendFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -36,11 +34,11 @@ import { classifyTier } from './cost-model.js';
 import { estimateTaskCost } from './task-cost.js';
 import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 import { createToken, removeToken, getToken } from './project-state.js';
+import { DATA_DIR, ensureDir, gitExec, CLAUDE_CLI } from './constants.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
 const DEFAULT_MAX_ITERATIONS = 20;
 const DEFAULT_ITERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 
@@ -52,37 +50,6 @@ let PROJECT_DIR = null;
 export function setExperimentProjectDir(dir) {
   PROJECT_DIR = dir;
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function ensureDir(dir) {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
-function gitExec(args, options = {}) {
-  return execFileSync('git', args, { stdio: 'pipe', ...options }).toString().trim();
-}
-
-function findClaudeCli() {
-  const explicit = process.env.CLAUDE_CLI;
-  if (explicit) return explicit;
-
-  const candidates = [
-    join(homedir(), '.local', 'bin', 'claude'),
-    join(homedir(), 'bin', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-  ];
-
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-
-  return 'claude';
-}
-
-const CLAUDE_CLI = findClaudeCli();
 
 function experimentConfigPath(experimentId) {
   return join(DATA_DIR, `${experimentId}.experiment.json`);

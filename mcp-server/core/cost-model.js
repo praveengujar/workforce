@@ -1,8 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
+import { DATA_DIR } from './constants.js';
 const MODEL_PATH = join(DATA_DIR, 'cost-model.json');
 const DRIFT_THRESHOLD = 0.15;
 

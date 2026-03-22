@@ -3,17 +3,12 @@
  * Pure functions, no Express dependency. Persists to backlog.json in data dir.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { DATA_DIR, ensureDir } from '../core/constants.js';
 
-const DATA_DIR = process.env.WORKFORCE_DATA_DIR || join(homedir(), '.claude', 'tasks');
 const BACKLOG_PATH = join(DATA_DIR, 'backlog.json');
-
-function ensureDir(dir) {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
 
 function readBacklog() {
   try {
