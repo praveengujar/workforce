@@ -23,8 +23,9 @@ import { initWorkerManager, stopWorkerManager } from './core/worker-manager.js';
 import {
   createTaskHandler, listTasksHandler, getTaskHandler,
   cancelTaskHandler, retryTaskHandler, archiveTaskHandler,
-  taskEventsHandler, taskOutputHandler, replyToTaskHandler,
-  pauseTaskHandler, resumeTaskHandler, analyzePromptHandler,
+  cleanupTasksHandler, taskEventsHandler, taskOutputHandler,
+  replyToTaskHandler, pauseTaskHandler, resumeTaskHandler,
+  analyzePromptHandler,
 } from './tools/task-tools.js';
 
 import {
@@ -158,6 +159,17 @@ server.tool(
   'Archive a completed task to hide it from the active list.',
   { task_id: z.string().describe('Task ID to archive') },
   wrap(archiveTaskHandler),
+);
+
+server.tool(
+  'workforce_cleanup',
+  'Bulk cleanup old failed/rejected/stuck tasks. Archives them after optional cancellation.',
+  {
+    max_age_hours: z.number().optional().describe('Age threshold in hours (default: 24)'),
+    include_stuck: z.boolean().optional().describe('Also clean up stuck running/pending tasks (default: false)'),
+    dry_run: z.boolean().optional().describe('Preview what would be cleaned up without acting (default: false)'),
+  },
+  wrap(cleanupTasksHandler),
 );
 
 server.tool(

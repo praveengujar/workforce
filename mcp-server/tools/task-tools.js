@@ -209,6 +209,76 @@ export function archiveTaskHandler({ task_id }) {
 }
 
 // ---------------------------------------------------------------------------
+// cleanupTasksHandler
+// ---------------------------------------------------------------------------
+export async function cleanupTasksHandler({ max_age_hours, include_stuck, dry_run }) {
+  const allTasks = getAllTasks(true);
+  const now = Date.now();
+  const maxAge = (max_age_hours || 24) * 60 * 60 * 1000;
+  const targets = [];
+
+  for (const task of allTasks) {
+    if (task.status === 'archived') continue;
+
+    // Failed/rejected tasks older than max_age
+    if ((task.status === 'failed' || task.status === 'rejected') && task.completedAt) {
+      if (now - new Date(task.completedAt).getTime() > maxAge) {
+        targets.push({ id: task.id, status: task.status, reason: 'old failure', age: task.completedAt });
+        continue;
+      }
+    }
+
+    // Stuck running tasks — no progress for max_age
+    if (include_stuck && task.status === 'running' && task.startedAt) {
+      if (now - new Date(task.startedAt).getTime() > maxAge) {
+        targets.push({ id: task.id, status: task.status, reason: 'stuck running', age: task.startedAt });
+        continue;
+      }
+    }
+
+    // Stuck pending tasks — queued for max_age
+    if (include_stuck && task.status === 'pending' && task.createdAt) {
+      if (now - new Date(task.createdAt).getTime() > maxAge) {
+        targets.push({ id: task.id, status: task.status, reason: 'stuck pending', age: task.createdAt });
+        continue;
+      }
+    }
+  }
+
+  if (dry_run || targets.length === 0) {
+    return { dry_run: true, count: targets.length, targets: targets.map(t => ({ id: t.id.slice(0, 8), status: t.status, reason: t.reason })) };
+  }
+
+  let cancelled = 0;
+  let archived = 0;
+  for (const t of targets) {
+    const task = getTask(t.id);
+    if (!task) continue;
+
+    // Kill running/pending stuck tasks first
+    if (task.status === 'running' || task.status === 'pending') {
+      if (task.pid) {
+        try { process.kill(task.pid, 'SIGTERM'); } catch { /* already dead */ }
+      }
+      cancelTaskToken(task.id);
+      releaseTaskClaim(task.id);
+      removeWorker(task.id);
+      if (task.worktreePath) cleanupWorktree(task.id, task.worktreePath);
+      updateTask(task.id, { status: 'failed', error: 'Cleaned up: stuck task', completedAt: new Date().toISOString() });
+      logEvent(task.id, 'cleanup', `Stuck ${task.status} task cleaned up`);
+      cancelled++;
+    }
+
+    // Archive all targets
+    updateTask(t.id, { status: 'archived', archivedAt: new Date().toISOString() });
+    logEvent(t.id, 'archived', `Bulk cleanup: ${t.reason}`);
+    archived++;
+  }
+
+  return { dry_run: false, cancelled, archived, total: targets.length };
+}
+
+// ---------------------------------------------------------------------------
 // taskEventsHandler
 // ---------------------------------------------------------------------------
 export function taskEventsHandler({ task_id }) {
