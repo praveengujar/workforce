@@ -3,6 +3,8 @@
  * Uses Unicode visual elements for compact, readable dashboard output.
  */
 
+import { progressBar } from './sparkline.js';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -24,18 +26,6 @@ export function elapsed(isoString) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
-}
-
-/**
- * Returns a progress bar string using filled/empty block characters.
- * @param {number} value - Current value
- * @param {number} max - Maximum value (1.0 for percentages)
- * @param {number} width - Bar width in characters
- */
-export function progressBar(value, max = 1, width = 10) {
-  const ratio = Math.max(0, Math.min(1, value / max));
-  const filled = Math.round(ratio * width);
-  return '\u25B0'.repeat(filled) + '\u25B1'.repeat(width - filled);
 }
 
 /**
@@ -65,13 +55,15 @@ const STATUS_ICON = {
   paused:  '\u25D6',   // ◖
   rejected: '\u2718',  // ✘
   archived: '\u2713',  // ✓
+  completed: '\u2713', // ✓
+  stopped: '\u25D6',   // ◖
 };
 
-function statusIcon(status) {
+export function statusIcon(status) {
   return STATUS_ICON[status] || '?';
 }
 
-function dollar(val) {
+export function dollar(val) {
   if (val == null || isNaN(val)) return '$0.00';
   return `$${Number(val).toFixed(2)}`;
 }
@@ -224,80 +216,14 @@ export function formatCostSummary(costSummary) {
     lines.push('');
     lines.push('  \u2500\u2500\u2500 budget \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
     if (b.dailyLimit != null) {
-      lines.push(`  Daily:   ${dollar(costSummary.today)} / ${dollar(b.dailyLimit)}  ${progressBar(costSummary.today, b.dailyLimit)}  ${dollar(b.dailyLimit - costSummary.today)} remaining`);
+      lines.push(`  Daily:   ${dollar(costSummary.today)} / ${dollar(b.dailyLimit)}  ${progressBar(costSummary.today / b.dailyLimit)}  ${dollar(b.dailyLimit - costSummary.today)} remaining`);
     }
     if (b.weeklyLimit != null) {
-      lines.push(`  Weekly:  ${dollar(costSummary.thisWeek)} / ${dollar(b.weeklyLimit)}  ${progressBar(costSummary.thisWeek, b.weeklyLimit)}  ${dollar(b.weeklyLimit - costSummary.thisWeek)} remaining`);
+      lines.push(`  Weekly:  ${dollar(costSummary.thisWeek)} / ${dollar(b.weeklyLimit)}  ${progressBar(costSummary.thisWeek / b.weeklyLimit)}  ${dollar(b.weeklyLimit - costSummary.thisWeek)} remaining`);
     }
     if (b.monthlyLimit != null) {
-      lines.push(`  Monthly: ${dollar(costSummary.thisMonth)} / ${dollar(b.monthlyLimit)}  ${progressBar(costSummary.thisMonth, b.monthlyLimit)}  ${dollar(b.monthlyLimit - costSummary.thisMonth)} remaining`);
+      lines.push(`  Monthly: ${dollar(costSummary.thisMonth)} / ${dollar(b.monthlyLimit)}  ${progressBar(costSummary.thisMonth / b.monthlyLimit)}  ${dollar(b.monthlyLimit - costSummary.thisMonth)} remaining`);
     }
-  }
-
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// formatDashboard
-// ---------------------------------------------------------------------------
-
-/**
- * Full dashboard: tasks + health + cost.
- */
-export function formatDashboard(tasks, healthMetrics, costSummary) {
-  const lines = [];
-  lines.push('\u2501\u2501\u2501 WORKFORCE DASHBOARD \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
-  lines.push('');
-
-  // Running tasks
-  const running = (tasks || []).filter(t => t.status === 'running');
-  const maxSlots = 10;
-  lines.push(`  RUNNING (${running.length}/${maxSlots} slots)`);
-  if (running.length === 0) {
-    lines.push('  (no running tasks)');
-  } else {
-    for (const t of running) {
-      const time = elapsed(t.startedAt);
-      const proj = t.project || '';
-      lines.push(`  \u25CF ${shortId(t.id)}  ${time.padEnd(8)} ${proj.padEnd(14)} "${truncate(t.prompt, 36)}"`);
-    }
-  }
-
-  // Pending
-  const pending = (tasks || []).filter(t => t.status === 'pending');
-  if (pending.length > 0) {
-    lines.push('');
-    lines.push(`  PENDING (${pending.length})`);
-    for (const t of pending) {
-      lines.push(`  \u25CB ${shortId(t.id)}  ${elapsed(t.createdAt).padEnd(8)} "${truncate(t.prompt, 42)}"`);
-    }
-  }
-
-  // Review
-  const review = (tasks || []).filter(t => t.status === 'review');
-  if (review.length > 0) {
-    lines.push('');
-    lines.push(`  REVIEW (${review.length})`);
-    for (const t of review) {
-      lines.push(`  \u25C6 ${shortId(t.id)}  ${t.project || ''} "${truncate(t.prompt, 42)}"`);
-    }
-  }
-
-  // Health section
-  if (healthMetrics) {
-    lines.push('');
-    lines.push('  \u2500\u2500\u2500 health \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
-    const successTarget = 0.85;
-    const successMet = healthMetrics.doneRate >= successTarget;
-    lines.push(`  Success ${pct(healthMetrics.doneRate).padEnd(5)} ${progressBar(healthMetrics.doneRate)}  target ${pct(successTarget)} ${successMet ? '\u2713' : '\u2717'}`);
-    lines.push(`  1-shot  ${pct(healthMetrics.oneShotRate).padEnd(5)} ${progressBar(healthMetrics.oneShotRate)}`);
-  }
-
-  // Cost section
-  if (costSummary) {
-    lines.push('');
-    lines.push('  \u2500\u2500\u2500 cost \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
-    lines.push(`  Today ${dollar(costSummary.today)} \u2502 Week ${dollar(costSummary.thisWeek)} \u2502 Month ${dollar(costSummary.thisMonth)}`);
   }
 
   return lines.join('\n');

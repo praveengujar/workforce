@@ -10,7 +10,7 @@ import {
   listExperiments,
 } from '../core/experiment-runner.js';
 import { sparkline } from './sparkline.js';
-import { shortId, truncate, elapsed } from './formatters.js';
+import { shortId, truncate, elapsed, dollar, statusIcon } from './formatters.js';
 
 // ---------------------------------------------------------------------------
 // createExperimentHandler
@@ -69,22 +69,6 @@ export function listExperimentsHandler() {
 // ---------------------------------------------------------------------------
 // Formatters
 // ---------------------------------------------------------------------------
-
-function dollar(val) {
-  if (val == null || isNaN(val)) return '$0.00';
-  return `$${Number(val).toFixed(2)}`;
-}
-
-const STATUS_ICON = {
-  running: '\u25CF',    // ●
-  completed: '\u2713',  // ✓
-  stopped: '\u25D6',    // ◖
-  failed: '\u2717',     // ✗
-};
-
-function statusIcon(status) {
-  return STATUS_ICON[status] || '?';
-}
 
 /**
  * Format a full experiment status display.

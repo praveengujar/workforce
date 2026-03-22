@@ -11,30 +11,12 @@ import { logEvent } from './task-events.js';
 import { estimateTaskCost } from './task-cost.js';
 import { capturePane, killSession, hasSession } from './tmux.js';
 import { cancelTask as cancelTaskToken } from './project-state.js';
+import { parseDetailedCost } from './cost-tracker.js';
 
 const COST_MULTIPLIER_LIMIT = 2.0;   // Kill if actual > 2x estimated
 const SCAN_INTERVAL_MS = 15_000;      // Check every 15 seconds
 
 let _intervalId = null;
-
-/**
- * Extract current cost from tmux pane output.
- * Claude CLI periodically prints cost like: "Total cost: $1.23" or just "$1.23"
- * Look for the LAST occurrence of a dollar amount in the output.
- *
- * @param {string} output - Tmux pane content
- * @returns {number|null} - Extracted cost or null
- */
-export function extractCostFromOutput(output) {
-  if (!output) return null;
-  // Match patterns like "$1.23", "cost: $1.23", "$0.05"
-  const matches = output.match(/\$(\d+\.\d{2})/g);
-  if (!matches || matches.length === 0) return null;
-  // Take the last match (most recent cost report)
-  const lastMatch = matches[matches.length - 1];
-  const cost = parseFloat(lastMatch.replace('$', ''));
-  return isNaN(cost) ? null : cost;
-}
 
 /**
  * Run a single cost watchdog scan across all running tasks.
@@ -49,7 +31,7 @@ export function runCostWatchdogScan() {
 
     // Capture current output
     const output = capturePane(task.tmuxSession);
-    const currentCost = extractCostFromOutput(output);
+    const currentCost = parseDetailedCost(output).cost;
     if (currentCost === null) continue;
 
     // Get estimated cost

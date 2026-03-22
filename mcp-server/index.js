@@ -38,8 +38,8 @@ import {
 } from './tools/backlog-tools.js';
 
 import {
-  healthMetricsHandler, costSummaryHandler, listProjectsHandler,
-  listProfilesHandler, runRecoveryHandler,
+  healthMetricsHandler, costSummaryHandler,
+  runRecoveryHandler,
 } from './tools/monitoring-tools.js';
 
 import {
@@ -305,7 +305,10 @@ server.tool(
   {
     scope: z.string().optional().describe('Budget scope: "global" (default) or project name'),
   },
-  wrap(getBudgetHandler),
+  wrapFormatted(async (params) => {
+    const result = getBudgetHandler(params);
+    return result.text || JSON.stringify(result.data || result, null, 2);
+  }),
 );
 
 // ---------------------------------------------------------------------------

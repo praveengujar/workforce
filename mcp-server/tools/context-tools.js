@@ -1,6 +1,5 @@
-import { readAllSharedContext, readSharedContext, writeSharedContext, deleteSharedContext, getTasksByGroup } from '../core/db.js';
+import { readAllSharedContext, readSharedContext, writeSharedContext, getTasksByGroup, getTask } from '../core/db.js';
 import { resolveDependencies, buildDependencyTree } from '../core/dependency-resolver.js';
-import { getTask } from '../core/db.js';
 
 export function writeContextHandler({ group, key, value, task_id }) {
   if (!group) throw new Error('group is required');
