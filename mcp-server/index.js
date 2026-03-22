@@ -71,7 +71,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 const server = new McpServer({
   name: 'workforce',
-  version: '1.2.0',
+  version: '1.2.1',
 });
 
 // Helper: wrap handler so errors become tool error results instead of crashes
