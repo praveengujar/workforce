@@ -69,9 +69,11 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
+const WORKFORCE_VERSION = '1.2.1';
+
 const server = new McpServer({
   name: 'workforce',
-  version: '1.2.1',
+  version: WORKFORCE_VERSION,
 });
 
 // Helper: wrap handler so errors become tool error results instead of crashes
@@ -106,7 +108,7 @@ server.tool(
   'workforce_version',
   'Return the workforce plugin version.',
   {},
-  async () => ({ content: [{ type: 'text', text: server.server.version }] }),
+  async () => ({ content: [{ type: 'text', text: WORKFORCE_VERSION }] }),
 );
 
 // ---------------------------------------------------------------------------

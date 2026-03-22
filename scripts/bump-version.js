@@ -68,8 +68,12 @@ function main() {
   writeJson(FILES.package, pkg);
   console.log(`  ✓ mcp-server/package.json`);
 
-  // 3. index.js — update McpServer version string
+  // 3. index.js — update WORKFORCE_VERSION constant and McpServer version
   let indexContent = readFileSync(FILES.index, 'utf8');
+  indexContent = indexContent.replace(
+    /WORKFORCE_VERSION\s*=\s*['"][\d.]+['"]/,
+    `WORKFORCE_VERSION = '${next}'`,
+  );
   indexContent = indexContent.replace(
     /version:\s*['"][\d.]+['"]/,
     `version: '${next}'`,
