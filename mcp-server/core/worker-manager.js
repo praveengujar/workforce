@@ -53,7 +53,7 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 // Constants
 // ---------------------------------------------------------------------------
 const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '10', 10);
-const TASK_TIMEOUT = parseInt(process.env.WORKFORCE_TASK_TIMEOUT || String(10 * 60 * 1000), 10);
+const TASK_TIMEOUT = parseInt(process.env.WORKFORCE_TASK_TIMEOUT || String(30 * 60 * 1000), 10);
 const STUCK_NUDGE = 8 * 60 * 1000;   // 480 000 ms
 const AUTO_ARCHIVE_DELAY = 5 * 60 * 1000; // 300 000 ms
 const MERGE_LOCKS = new Map(); // per-repo merge serialization
@@ -252,6 +252,12 @@ async function spawnWorker(task) {
     throw new Error(`git worktree add failed: ${err.stderr?.toString() || err.message}`);
   }
 
+  // Record the base commit so zero-work guard can compare against it (not HEAD)
+  let baseCommit;
+  try {
+    baseCommit = gitExec(['rev-parse', 'HEAD'], { cwd: worktreePath });
+  } catch { /* ignore */ }
+
   // 2. Build effective prompt with context
   let effectivePrompt = task.prompt;
 
@@ -378,6 +384,7 @@ async function spawnWorker(task) {
       worktreePath,
       branch: branchName,
       tmuxSession,
+      baseCommit,
     });
 
     logEvent(taskId, 'task_started', `tmux=${tmuxSession} pid=${pid}`);
@@ -446,7 +453,7 @@ async function spawnWorker(task) {
   // --- child_process spawn path ---
   const child = spawn(CLAUDE_CLI, ['--print', '--dangerously-skip-permissions', '-p', effectivePrompt], {
     cwd: worktreePath,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env },
   });
 
@@ -482,6 +489,7 @@ async function spawnWorker(task) {
     startedAt: new Date().toISOString(),
     worktreePath,
     branch: branchName,
+    baseCommit,
   });
 
   // 6. Log events
@@ -553,12 +561,19 @@ async function handleTmuxWorkerExit(taskId, output) {
   const worktreePath = task.worktreePath;
   const cleanOutput = (output || '').slice(-4000);
 
-  // Check for file changes
+  // Check for file changes — compare against base commit, not HEAD
+  // (HEAD moves if the agent commits during its run)
   let filesChanged = false;
   if (worktreePath) {
     try {
-      const diff = gitExec(['diff', '--stat', 'HEAD'], { cwd: worktreePath });
+      const compareRef = task.baseCommit || 'HEAD';
+      const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
       filesChanged = diff.length > 0;
+      if (!filesChanged) {
+        // Also check for commits beyond the base
+        const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
+        filesChanged = parseInt(logCount, 10) > 0;
+      }
     } catch {
       try {
         const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
@@ -663,14 +678,21 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
   }
 
   // 3. Zero-work guard: did any files change?
+  // Compare against base commit (not HEAD) because agent may have committed during its run
   let filesChanged = false;
   const freshTask = getTask(taskId);
   const worktreePath = freshTask?.worktreePath;
 
   if (worktreePath) {
     try {
-      const diff = gitExec(['diff', '--stat', 'HEAD'], { cwd: worktreePath });
+      const compareRef = freshTask.baseCommit || 'HEAD';
+      const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
       filesChanged = diff.length > 0;
+      if (!filesChanged) {
+        // Also check for commits beyond the base
+        const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
+        filesChanged = parseInt(logCount, 10) > 0;
+      }
     } catch {
       try {
         const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });

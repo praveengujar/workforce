@@ -224,6 +224,16 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(7, new Date().toISOString());
     console.error('[db] Applied migration 7: targetBranch column');
   }
+
+  // Migration 8: baseCommit for zero-work guard comparison
+  const m8 = db.prepare('SELECT version FROM schema_migrations WHERE version = 8').get();
+  if (!m8) {
+    try {
+      db.exec("ALTER TABLE tasks ADD COLUMN baseCommit TEXT");
+    } catch { /* column may already exist */ }
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(8, new Date().toISOString());
+    console.error('[db] Applied migration 8: baseCommit column');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +266,7 @@ const TASK_COLUMNS = new Set([
   'createdAt', 'startedAt', 'completedAt', 'archivedAt',
   'tmuxSession', 'autoMerge', 'profile',
   'taskType', 'experimentConfig',
-  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter', 'targetBranch',
+  'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter', 'targetBranch', 'baseCommit',
 ]);
 
 export function updateTask(id, updates) {
