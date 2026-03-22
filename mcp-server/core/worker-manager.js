@@ -397,9 +397,13 @@ async function spawnWorker(task) {
   const tmuxSession = `wf-${taskId.slice(0, 8)}`;
 
   if (useTmux) {
-    // Build the full command string for tmux
-    const cliArgs = [CLAUDE_CLI, '--print', '--dangerously-skip-permissions', '-p', JSON.stringify(effectivePrompt)];
-    const fullCommand = cliArgs.map(a => typeof a === 'string' && a.includes(' ') ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
+    // Write prompt to a temp file to avoid shell escaping issues in tmux
+    const { writeFileSync: writeFileSync_ } = await import('node:fs');
+    const promptFile = join(DATA_DIR, `${taskId}.prompt`);
+    ensureDir(DATA_DIR);
+    writeFileSync_(promptFile, effectivePrompt, 'utf8');
+    // Use cat to pipe the prompt file — avoids all shell metacharacter issues
+    const fullCommand = `cat ${JSON.stringify(promptFile)} | ${CLAUDE_CLI} --print --dangerously-skip-permissions`;
 
     try {
       createSession(tmuxSession, fullCommand, worktreePath);
@@ -494,7 +498,13 @@ async function spawnWorker(task) {
   }
 
   // --- child_process spawn path ---
-  const child = spawn(CLAUDE_CLI, ['--print', '--dangerously-skip-permissions', '-p', effectivePrompt], {
+  // Write prompt to temp file for the non-tmux path too (avoids arg length limits)
+  const { writeFileSync: writeFileSync_ } = await import('node:fs');
+  const promptFile = join(DATA_DIR, `${taskId}.prompt`);
+  ensureDir(DATA_DIR);
+  writeFileSync_(promptFile, effectivePrompt, 'utf8');
+
+  const child = spawn('sh', ['-c', `cat ${JSON.stringify(promptFile)} | ${CLAUDE_CLI} --print --dangerously-skip-permissions`], {
     cwd: worktreePath,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env },
@@ -649,6 +659,9 @@ async function handleTmuxWorkerExit(taskId, output) {
   HANDLED_EXITS.delete(taskId);
   removeToken(taskId);
 
+  // Clean up prompt file
+  try { const { unlinkSync } = await import('node:fs'); unlinkSync(join(DATA_DIR, `${taskId}.prompt`)); } catch { /* ignore */ }
+
   await promotePending();
 }
 
@@ -724,6 +737,9 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
 
   // 8. Cleanup token
   removeToken(taskId);
+
+  // Clean up prompt file
+  try { const { unlinkSync } = await import('node:fs'); unlinkSync(join(DATA_DIR, `${task.id}.prompt`)); } catch { /* ignore */ }
 
   // Try to promote next pending task
   await promotePending();
