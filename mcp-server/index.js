@@ -12,7 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 // Core modules
-import { getDb, getBudget, setBudget, getCostForPeriod, getRunningTasks } from './core/db.js';
+import { getDb, getBudget, getRunningTasks } from './core/db.js';
 import { killSession } from './core/tmux.js';
 import { loadCostModel } from './core/cost-model.js';
 import { loadProfiles } from './core/profiles.js';
@@ -105,7 +105,7 @@ function wrapFormatted(handler) {
 server.tool(
   'workforce_create_task',
   'Create a new autonomous agent task. Spawns Claude CLI in an isolated git worktree.',
-  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), profile: z.string().optional().describe('Agent profile (default/interactive)'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)'), depends_on: z.array(z.string()).optional().describe('Array of task IDs this task depends on'), group: z.string().optional().describe('Task group ID for dependency chains'), phase: z.number().optional().describe('Execution phase number'), parent_id: z.string().optional().describe('Parent task ID') },
+  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)'), depends_on: z.array(z.string()).optional().describe('Array of task IDs this task depends on'), group: z.string().optional().describe('Task group ID for dependency chains'), phase: z.number().optional().describe('Execution phase number'), parent_id: z.string().optional().describe('Parent task ID') },
   wrap(createTaskHandler),
 );
 
@@ -296,18 +296,7 @@ server.tool(
     weekly_limit: z.number().optional().describe('Weekly spending limit in dollars'),
     monthly_limit: z.number().optional().describe('Monthly spending limit in dollars'),
   },
-  wrap(({ scope, daily_limit, weekly_limit, monthly_limit }) => {
-    const budgetScope = scope || 'global';
-    if (daily_limit == null && weekly_limit == null && monthly_limit == null) {
-      throw new Error('At least one limit (daily_limit, weekly_limit, or monthly_limit) is required');
-    }
-    const budget = setBudget(budgetScope, {
-      dailyLimit: daily_limit,
-      weeklyLimit: weekly_limit,
-      monthlyLimit: monthly_limit,
-    });
-    return budget;
-  }),
+  wrap(setBudgetHandler),
 );
 
 server.tool(
@@ -316,35 +305,7 @@ server.tool(
   {
     scope: z.string().optional().describe('Budget scope: "global" (default) or project name'),
   },
-  wrap(({ scope }) => {
-    const budgetScope = scope || 'global';
-    const budget = getBudget(budgetScope);
-
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-
-    const todaySpend = getCostForPeriod(budgetScope, startOfToday, endOfDay);
-    const weekSpend = getCostForPeriod(budgetScope, startOfWeek, endOfDay);
-    const monthSpend = getCostForPeriod(budgetScope, startOfMonth, endOfDay);
-
-    return {
-      scope: budgetScope,
-      budget: budget || { dailyLimit: null, weeklyLimit: null, monthlyLimit: null },
-      currentSpend: {
-        today: Math.round(todaySpend * 100) / 100,
-        thisWeek: Math.round(weekSpend * 100) / 100,
-        thisMonth: Math.round(monthSpend * 100) / 100,
-      },
-      remaining: {
-        daily: budget?.dailyLimit != null ? Math.round((budget.dailyLimit - todaySpend) * 100) / 100 : null,
-        weekly: budget?.weeklyLimit != null ? Math.round((budget.weeklyLimit - weekSpend) * 100) / 100 : null,
-        monthly: budget?.monthlyLimit != null ? Math.round((budget.monthlyLimit - monthSpend) * 100) / 100 : null,
-      },
-    };
-  }),
+  wrap(getBudgetHandler),
 );
 
 // ---------------------------------------------------------------------------

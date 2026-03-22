@@ -234,7 +234,7 @@ export function getAllTasks(includeArchived = false) {
   if (includeArchived) {
     return stmt('SELECT * FROM tasks ORDER BY createdAt DESC').all();
   }
-  return stmt("SELECT * FROM tasks WHERE status NOT IN ('archived', 'rejected') ORDER BY createdAt DESC").all();
+  return stmt("SELECT * FROM tasks WHERE status NOT IN ('archived') ORDER BY createdAt DESC").all();
 }
 
 export function getTask(id) {

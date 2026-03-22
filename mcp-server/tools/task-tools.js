@@ -28,7 +28,7 @@ function ensureDir(dir) {
 // ---------------------------------------------------------------------------
 // createTaskHandler
 // ---------------------------------------------------------------------------
-export async function createTaskHandler({ prompt, project, profile, autoMerge, parent_id, depends_on, group, phase }) {
+export async function createTaskHandler({ prompt, project, autoMerge, parent_id, depends_on, group, phase }) {
   if (!prompt) throw new Error('prompt is required');
 
   // Validate depends_on references exist
@@ -44,7 +44,6 @@ export async function createTaskHandler({ prompt, project, profile, autoMerge, p
 
   // Set optional fields that createTask doesn't handle directly
   const extras = {};
-  if (profile) extras.profile = profile;
   if (autoMerge) extras.autoMerge = autoMerge ? 1 : 0;
   if (parent_id) extras.parentId = parent_id;
   if (depends_on && depends_on.length > 0) extras.dependsOn = JSON.stringify(depends_on);

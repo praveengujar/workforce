@@ -73,9 +73,7 @@ export async function approveTaskHandler({ task_id, reason }) {
   if (!task) throw new Error('task not found');
   if (task.status !== 'review') throw new Error('task is not in review status');
 
-  if (reason) {
-    logEvent(task.id, 'approval_reason', reason);
-  }
+  logEvent(task.id, 'approved', reason || 'Approved by user');
 
   await mergeWorktree(task);
 

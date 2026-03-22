@@ -1,6 +1,6 @@
 # Workforce
 
-A Claude Code plugin that turns Claude into a task orchestrator — spawning autonomous agent sessions in isolated git worktrees, managing their lifecycle, and merging results back to main.
+A Claude Code plugin that turns Claude into a task orchestrator — spawning autonomous agent sessions in isolated git worktrees, managing their lifecycle, and merging results back to the target branch.
 
 ## What it does
 
@@ -79,7 +79,7 @@ pending → running → review → merging → done
 1. **Create**: You describe a task. Workforce creates a git worktree on a new branch (`wf/{task-id}`).
 2. **Run**: Claude CLI runs in a tmux session (or child process) with your prompt, plus injected context (other running tasks, recent commits, project memory).
 3. **Review**: When the agent finishes and files changed, the task enters review. You see the diff and approve or reject.
-4. **Merge**: On approval, changes merge to main with a per-repo lock to prevent conflicts between concurrent tasks.
+4. **Merge**: On approval, changes merge to the target branch with a per-repo lock to prevent conflicts between concurrent tasks.
 5. **Cleanup**: Worktree and branch are removed. Task auto-archives after 5 minutes.
 
 ### Recovery engine

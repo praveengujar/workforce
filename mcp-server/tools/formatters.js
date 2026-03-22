@@ -63,6 +63,7 @@ const STATUS_ICON = {
   done:    '\u2713',   // ✓
   failed:  '\u2717',   // ✗
   paused:  '\u25D6',   // ◖
+  rejected: '\u2718',  // ✘
   archived: '\u2713',  // ✓
 };
 
@@ -105,7 +106,7 @@ export function formatTaskList(tasks) {
   }
 
   // Display order
-  const order = ['running', 'pending', 'paused', 'review', 'done', 'failed', 'archived'];
+  const order = ['running', 'pending', 'paused', 'review', 'done', 'failed', 'rejected', 'archived'];
   for (const status of order) {
     const group = groups[status];
     if (!group || group.length === 0) continue;

@@ -25,7 +25,7 @@ Classify each failure into exactly one category:
 |----------|---------|----------|
 | **Timeout** | "timed out", "killed after" | Retry with narrower scope or decompose |
 | **Zero-work** | "No files changed", "zero-work guard" | Rewrite prompt to be more specific |
-| **Merge conflict** | "merge failed", "CONFLICT" | Retry after resolving conflict on main |
+| **Merge conflict** | "merge failed", "CONFLICT" | Retry after resolving conflict on target branch |
 | **Rate limit** | "rate limit", "529", "overloaded" | Wait and retry (auto-handled by recovery engine) |
 | **Binary missing** | "ENOENT", "not found" | Check Claude CLI installation |
 | **Budget exceeded** | "Budget exceeded" | Increase budget or reduce task scope |
@@ -62,7 +62,7 @@ When proposing a retry with an improved prompt:
 - If zero-work: add specific file paths, function names, and expected behavior
 - If timeout: reduce scope — split into smaller pieces
 - If agent error: add constraints based on what went wrong (e.g., "do not modify X")
-- If merge conflict: add instruction to check for recent changes on main first
+- If merge conflict: add instruction to check for recent changes on target branch first
 - Preserve the original intent — do not change what the task is trying to accomplish
 
 ## Batch Mode

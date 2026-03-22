@@ -1,6 +1,6 @@
 ---
 name: workforce-merge
-description: Pre-merge conflict check and guided merge for tasks in review. Scans for conflicts before approving, auto-resolves safe files, generates fix-up tasks for real conflicts. Use when merging tasks to main.
+description: Pre-merge conflict check and guided merge for tasks in review. Scans for conflicts before approving, auto-resolves safe files, generates fix-up tasks for real conflicts. Use when merging tasks to the target branch.
 ---
 
 When the user invokes /workforce-merge, perform safe merges with conflict prevention.

@@ -51,7 +51,7 @@ Then the diff:
 Then your analysis (2-3 sentences max) and:
 
 ```
-➤ Approve (merge to main) or Reject?
+➤ Approve (merge to target branch) or Reject?
 ```
 
 If there are multiple tasks in review, process them one at a time — show the first, wait for user decision, then show the next.

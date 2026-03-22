@@ -36,7 +36,7 @@ Each task spawns Claude CLI as a child process in an isolated git worktree (`wf/
 Phases: `pending → running → review → merging → done/failed`
 
 - Up to 10 concurrent tasks (hard cap)
-- Auto-merge to main on success; manual review by default
+- Auto-merge to target branch on success; manual review by default
 - Watchdog kills any task running > 10 min
 - Zero-work guard: if Claude made no real code changes, task is marked `failed`
 - Recovery engine detects 6 failure patterns every 30s
