@@ -233,9 +233,21 @@ async function spawnWorker(task) {
     console.error(`[spawnWorker] Budget check error for ${taskId}:`, err.message);
   }
 
-  // 1. Create git worktree
+  // 1. Create git worktree — branch from upstream task if dependency exists
   try {
-    gitExec(['worktree', 'add', worktreePath, '-b', branchName], { cwd: repoRoot });
+    let baseBranch = 'HEAD';
+    if (task.dependsOn) {
+      try {
+        const deps = JSON.parse(task.dependsOn);
+        if (deps.length > 0) {
+          const upstreamTask = getTask(deps[0]);
+          if (upstreamTask && upstreamTask.branch) {
+            baseBranch = upstreamTask.branch;
+          }
+        }
+      } catch { /* ignore parse errors — fall back to HEAD */ }
+    }
+    gitExec(['worktree', 'add', worktreePath, '-b', branchName, baseBranch], { cwd: repoRoot });
   } catch (err) {
     throw new Error(`git worktree add failed: ${err.stderr?.toString() || err.message}`);
   }
