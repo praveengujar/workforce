@@ -51,7 +51,7 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '3', 10);
+const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '5', 10);
 const LAUNCH_STAGGER_MS = parseInt(process.env.WORKFORCE_LAUNCH_STAGGER || '5000', 10);
 const TASK_TIMEOUT = parseInt(process.env.WORKFORCE_TASK_TIMEOUT || String(30 * 60 * 1000), 10);
 const STUCK_NUDGE = 8 * 60 * 1000;   // 480 000 ms
