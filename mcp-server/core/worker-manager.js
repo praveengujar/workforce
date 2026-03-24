@@ -359,7 +359,33 @@ async function spawnWorker(task) {
   } catch { /* ignore */ }
 
   // 2. Build effective prompt with context
+  const isAnalysis = task.taskType === 'analysis';
   let effectivePrompt = task.prompt;
+
+  // For analysis tasks, prepend investigation instructions
+  if (isAnalysis) {
+    effectivePrompt = `[ANALYSIS TASK — investigation only, no code changes expected]
+
+Your job is to investigate and produce a structured findings report. Do NOT modify any files.
+Explore the codebase, trace execution paths, and identify all issues related to the task below.
+
+Structure your output as:
+FINDINGS:
+1. [Issue title] — [file:line] — [description of the problem]
+2. ...
+
+For each finding, explain:
+- What's wrong or missing
+- Which files/functions are involved
+- What the fix should be (describe it, don't implement it)
+
+End with:
+Summary: [one-line summary of all findings]
+
+---
+
+${effectivePrompt}`;
+  }
 
   // Add context: open tasks on same project
   try {
@@ -423,13 +449,20 @@ async function spawnWorker(task) {
   }
 
   // Layer 5: Upstream task results — inject dependency outputs
+  // For tasks downstream of an analysis task, inject the full analysis output
+  // so the fix agent has the complete findings report, not just a summary.
   if (task.dependsOn) {
     try {
       const deps = JSON.parse(task.dependsOn);
       const upstreamResults = [];
       for (const depId of deps) {
         const dep = getTask(depId);
-        if (dep && dep.resultSummary) {
+        if (!dep) continue;
+        if (dep.taskType === 'analysis' && dep.output) {
+          // Full analysis output — this is the primary value of two-phase tasks
+          const capped = dep.output.length > 3000 ? dep.output.slice(-3000) : dep.output;
+          upstreamResults.push(`[Analysis from ${depId.slice(0, 8)}]\n${capped}`);
+        } else if (dep.resultSummary) {
           upstreamResults.push(`Task ${depId.slice(0, 8)} (${dep.status}): "${dep.prompt.slice(0, 80)}"\n  Result: ${dep.resultSummary}`);
         }
       }
@@ -681,8 +714,20 @@ async function handleTmuxWorkerExit(taskId, output) {
 
   // Check for file changes — compare against base commit, not HEAD
   const filesChanged = checkFilesChanged(worktreePath, task.baseCommit);
+  const isAnalysisTask = task.taskType === 'analysis';
 
-  if (filesChanged) {
+  if (isAnalysisTask) {
+    // Analysis tasks succeed without file changes — their output IS the deliverable
+    updateTask(taskId, {
+      status: 'done',
+      output: cleanOutput,
+      exitCode: 0,
+      completedAt: new Date().toISOString(),
+    });
+    logEvent(taskId, 'completed', 'Analysis task completed');
+    extractResultSummary(taskId, cleanOutput || output || '');
+    cleanupWorktree(taskId, worktreePath);
+  } else if (filesChanged) {
     // Commit changes
     try {
       gitExec(['add', '-A'], { cwd: worktreePath });
@@ -749,9 +794,21 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
   const freshTask = getTask(taskId);
   const worktreePath = freshTask?.worktreePath;
   const filesChanged = checkFilesChanged(worktreePath, freshTask?.baseCommit);
+  const isAnalysisTask = freshTask?.taskType === 'analysis';
 
   // 4 & 5. Decide outcome
-  if (exitCode === 0 && filesChanged) {
+  if (isAnalysisTask && exitCode === 0) {
+    // Analysis tasks succeed without file changes — their output IS the deliverable
+    updateTask(taskId, {
+      status: 'done',
+      output,
+      exitCode: 0,
+      completedAt: new Date().toISOString(),
+    });
+    logEvent(taskId, 'completed', 'Analysis task completed');
+    extractResultSummary(taskId, output || stdout || '');
+    cleanupWorktree(taskId, worktreePath);
+  } else if (exitCode === 0 && filesChanged) {
     try {
       gitExec(['add', '-A'], { cwd: worktreePath });
       const commitMsg = `wf: ${(task.prompt || 'Task work').slice(0, 72)}`;

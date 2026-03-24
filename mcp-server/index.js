@@ -120,7 +120,7 @@ server.tool(
 server.tool(
   'workforce_create_task',
   'Create a new autonomous agent task. Spawns Claude CLI in an isolated git worktree.',
-  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)'), depends_on: z.array(z.string()).optional().describe('Array of task IDs this task depends on'), group: z.string().optional().describe('Task group ID for dependency chains'), phase: z.number().optional().describe('Execution phase number'), parent_id: z.string().optional().describe('Parent task ID') },
+  { prompt: z.string().describe('Task instruction for the agent'), project: z.string().optional().describe('Project name'), autoMerge: z.boolean().optional().describe('Auto-merge on success (default: false)'), depends_on: z.array(z.string()).optional().describe('Array of task IDs this task depends on'), group: z.string().optional().describe('Task group ID for dependency chains'), phase: z.number().optional().describe('Execution phase number'), parent_id: z.string().optional().describe('Parent task ID'), task_type: z.enum(['standard', 'analysis', 'experiment', 'measurement']).optional().describe('Task type. "analysis" skips zero-work guard — for investigation tasks that produce findings without code changes') },
   wrap(createTaskHandler),
 );
 

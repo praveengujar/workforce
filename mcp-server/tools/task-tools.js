@@ -24,7 +24,7 @@ import { DATA_DIR, ensureDir } from '../core/constants.js';
 // ---------------------------------------------------------------------------
 // createTaskHandler
 // ---------------------------------------------------------------------------
-export async function createTaskHandler({ prompt, project, autoMerge, parent_id, depends_on, group, phase }) {
+export async function createTaskHandler({ prompt, project, autoMerge, parent_id, depends_on, group, phase, task_type }) {
   if (!prompt) throw new Error('prompt is required');
 
   // Validate depends_on references exist
@@ -45,6 +45,7 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
   if (depends_on && depends_on.length > 0) extras.dependsOn = JSON.stringify(depends_on);
   if (group) extras.taskGroup = group;
   if (phase != null) extras.phase = phase;
+  if (task_type) extras.taskType = task_type;
   // Record current branch as merge target
   try {
     const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { stdio: 'pipe' }).toString().trim();
