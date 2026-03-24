@@ -51,7 +51,8 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '10', 10);
+const MAX_CONCURRENT = parseInt(process.env.WORKFORCE_MAX_CONCURRENT || process.env.MAX_CONCURRENT || '3', 10);
+const LAUNCH_STAGGER_MS = parseInt(process.env.WORKFORCE_LAUNCH_STAGGER || '5000', 10);
 const TASK_TIMEOUT = parseInt(process.env.WORKFORCE_TASK_TIMEOUT || String(30 * 60 * 1000), 10);
 const STUCK_NUDGE = 8 * 60 * 1000;   // 480 000 ms
 const AUTO_ARCHIVE_DELAY = 5 * 60 * 1000; // 300 000 ms
@@ -192,14 +193,21 @@ async function promotePending() {
       return (a.createdAt || '').localeCompare(b.createdAt || '');
     });
 
+    let launched = 0;
     for (const task of ready) {
       if (slots <= 0) break;
       const claimed = claimTask(task.id, 'server');
       if (!claimed) continue;
 
+      // Stagger launches to avoid resource exhaustion
+      if (launched > 0 && LAUNCH_STAGGER_MS > 0) {
+        await new Promise(r => setTimeout(r, LAUNCH_STAGGER_MS));
+      }
+
       try {
         await spawnWorker(task);
         slots--;
+        launched++;
       } catch (err) {
         console.error(`[promotePending] Failed to spawn worker for ${task.id}:`, err.message);
         releaseTaskClaim(task.id);
