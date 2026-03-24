@@ -3,7 +3,7 @@ import { getAllTasks, updateTask } from './db.js';
 import { logEvent } from './task-events.js';
 
 const SCAN_INTERVAL_MS = 30_000;
-const ZOMBIE_THRESHOLD_MS = 3 * 60 * 1000;
+const ZOMBIE_THRESHOLD_MS = 10 * 60 * 1000;
 const RETRY_BACKOFF_MS = 60_000;
 const MAX_RETRIES_DEFAULT = 3;
 

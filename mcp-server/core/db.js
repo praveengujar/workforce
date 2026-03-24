@@ -244,7 +244,13 @@ export function getAllTasks(includeArchived = false) {
 }
 
 export function getTask(id) {
-  return stmt('SELECT * FROM tasks WHERE id = ?').get(id);
+  const exact = stmt('SELECT * FROM tasks WHERE id = ?').get(id);
+  if (exact) return exact;
+  // Support short ID prefix matching (e.g., "3cf5c8e5" matches full UUID)
+  if (id && id.length >= 8 && id.length < 36) {
+    return getDb().prepare('SELECT * FROM tasks WHERE id LIKE ? LIMIT 1').get(`${id}%`);
+  }
+  return undefined;
 }
 
 export function createTask({ id, prompt, project }) {

@@ -18,10 +18,15 @@ export function createSession(name, command, cwd, env = {}) {
   const envPrefix = Object.entries(env)
     .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
     .join('; ');
-  const fullCommand = envPrefix ? `${envPrefix}; ${command}` : command;
+  // Append "; exit" so the tmux session terminates when the command finishes.
+  // Without this, the shell inside tmux stays alive after Claude exits,
+  // and the exit-check loop never detects task completion.
+  const wrappedCommand = envPrefix
+    ? `${envPrefix}; ${command}; exit`
+    : `${command}; exit`;
 
   execFileSync('tmux', [
-    'new-session', '-d', '-s', name, '-c', cwd, fullCommand,
+    'new-session', '-d', '-s', name, '-c', cwd, wrappedCommand,
   ], { stdio: 'pipe', env: mergedEnv });
 }
 
