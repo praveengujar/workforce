@@ -13,6 +13,7 @@ import {
   setBudget,
   getCostForPeriod,
   getDailyCostHistory,
+  getTaskCountForPeriod,
 } from '../core/db.js';
 
 import { progressBar, costTrendLine } from './sparkline.js';
@@ -21,7 +22,7 @@ import {
   saveCostPolicy,
   getDefaultPolicy,
 } from './cost-approval.js';
-import { getDateBoundaries } from '../core/constants.js';
+import { getDateBoundaries, isSubscriptionMode } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // setBudgetHandler
@@ -93,6 +94,37 @@ export function getBudgetHandler({ scope }) {
   const { startOfToday, startOfWeek, startOfMonth, endOfDay } = getDateBoundaries();
   const now = new Date().toISOString();
 
+  if (isSubscriptionMode()) {
+    const dailyCount = getTaskCountForPeriod(budgetScope, startOfToday, now);
+    const weeklyCount = getTaskCountForPeriod(budgetScope, startOfWeek, now);
+    const monthlyCount = getTaskCountForPeriod(budgetScope, startOfMonth, now);
+
+    const lines = [];
+    lines.push(`\u2501\u2501\u2501 BUDGET: ${budgetScope} (task limits) \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`);
+
+    if (budget.dailyLimit != null) {
+      const remaining = Math.max(0, budget.dailyLimit - dailyCount);
+      const pct = budget.dailyLimit > 0 ? remaining / budget.dailyLimit : 0;
+      lines.push(`Daily:   ${dailyCount} / ${budget.dailyLimit} tasks  (${Math.round(pct * 100)}% remaining)  ${progressBar(pct)}`);
+    }
+    if (budget.weeklyLimit != null) {
+      const remaining = Math.max(0, budget.weeklyLimit - weeklyCount);
+      const pct = budget.weeklyLimit > 0 ? remaining / budget.weeklyLimit : 0;
+      lines.push(`Weekly:  ${weeklyCount} / ${budget.weeklyLimit} tasks  (${Math.round(pct * 100)}% remaining)  ${progressBar(pct)}`);
+    }
+    if (budget.monthlyLimit != null) {
+      const remaining = Math.max(0, budget.monthlyLimit - monthlyCount);
+      const pct = budget.monthlyLimit > 0 ? remaining / budget.monthlyLimit : 0;
+      lines.push(`Monthly: ${monthlyCount} / ${budget.monthlyLimit} tasks  (${Math.round(pct * 100)}% remaining)  ${progressBar(pct)}`);
+    }
+
+    return {
+      text: lines.join('\n'),
+      data: { scope: budgetScope, budget, usage: { daily: dailyCount, weekly: weeklyCount, monthly: monthlyCount } },
+    };
+  }
+
+  // API mode: existing dollar-based display below
   const dailySpend = getCostForPeriod(budgetScope, startOfToday, now);
   const weeklySpend = getCostForPeriod(budgetScope, startOfWeek, now);
   const monthlySpend = getCostForPeriod(budgetScope, startOfMonth, now);

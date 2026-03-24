@@ -6,7 +6,7 @@
 import { getAllTasks } from '../core/db.js';
 import { classifyTier } from '../core/cost-model.js';
 import { runRecoveryScan } from '../core/recovery-engine.js';
-import { getDateBoundaries } from '../core/constants.js';
+import { getDateBoundaries, isSubscriptionMode } from '../core/constants.js';
 
 // ---------------------------------------------------------------------------
 // healthMetricsHandler
@@ -58,6 +58,40 @@ export function costSummaryHandler() {
   const allTasks = getAllTasks(true);
   const { startOfToday, startOfWeek, startOfMonth } = getDateBoundaries();
 
+  if (isSubscriptionMode()) {
+    let todayTasks = 0, weekTasks = 0, monthTasks = 0;
+    const byTier = { simple: 0, medium: 0, complex: 0 };
+    let totalDurationMs = 0;
+    let completedCount = 0;
+
+    for (const task of allTasks) {
+      const completedAt = task.completedAt || task.createdAt;
+      if (!completedAt) continue;
+      const tier = classifyTier(task.prompt || '');
+      byTier[tier]++;
+
+      if (completedAt >= startOfToday) todayTasks++;
+      if (completedAt >= startOfWeek) weekTasks++;
+      if (completedAt >= startOfMonth) monthTasks++;
+
+      if (task.startedAt && task.completedAt) {
+        totalDurationMs += new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
+        completedCount++;
+      }
+    }
+
+    return {
+      mode: 'subscription',
+      today: todayTasks,
+      thisWeek: weekTasks,
+      thisMonth: monthTasks,
+      byTier,
+      totalDurationMs,
+      avgDurationMs: completedCount > 0 ? Math.round(totalDurationMs / completedCount) : 0,
+    };
+  }
+
+  // API mode: existing code below
   let today = 0;
   let thisWeek = 0;
   let thisMonth = 0;
@@ -77,6 +111,7 @@ export function costSummaryHandler() {
   }
 
   return {
+    mode: 'api',
     today: Math.round(today * 100) / 100,
     thisWeek: Math.round(thisWeek * 100) / 100,
     thisMonth: Math.round(thisMonth * 100) / 100,

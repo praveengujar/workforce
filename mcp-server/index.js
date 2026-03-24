@@ -65,12 +65,13 @@ import {
 } from './tools/context-tools.js';
 
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
+import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '1.2.1';
+const WORKFORCE_VERSION = '1.3.0';
 
 const server = new McpServer({
   name: 'workforce',
@@ -314,19 +315,19 @@ server.tool(
 
 server.tool(
   'workforce_set_budget',
-  'Set spending limits for the workforce. Scope can be "global" or a project name.',
+  `Set ${isSubscriptionMode() ? 'task count' : 'spending'} limits for the workforce. Scope can be "global" or a project name.`,
   {
     scope: z.string().optional().describe('Budget scope: "global" (default) or project name'),
-    daily_limit: z.number().optional().describe('Daily spending limit in dollars'),
-    weekly_limit: z.number().optional().describe('Weekly spending limit in dollars'),
-    monthly_limit: z.number().optional().describe('Monthly spending limit in dollars'),
+    daily_limit: z.number().optional().describe(`Daily ${isSubscriptionMode() ? 'task count' : 'spending'} limit`),
+    weekly_limit: z.number().optional().describe(`Weekly ${isSubscriptionMode() ? 'task count' : 'spending'} limit`),
+    monthly_limit: z.number().optional().describe(`Monthly ${isSubscriptionMode() ? 'task count' : 'spending'} limit`),
   },
   wrap(setBudgetHandler),
 );
 
 server.tool(
   'workforce_get_budget',
-  'Get budget limits and current spend for a scope.',
+  `Get budget limits and current ${isSubscriptionMode() ? 'task usage' : 'spend'} for a scope.`,
   {
     scope: z.string().optional().describe('Budget scope: "global" (default) or project name'),
   },

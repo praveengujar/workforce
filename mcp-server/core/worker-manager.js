@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DATA_DIR, ensureDir, gitExec, CLAUDE_CLI } from './constants.js';
+import { DATA_DIR, ensureDir, gitExec, CLAUDE_CLI, isSubscriptionMode, getDateBoundaries } from './constants.js';
 
 import {
   getAllTasks,
@@ -29,6 +29,7 @@ import {
   removeWorker,
   getBudget,
   getCostForPeriod,
+  getTaskCountForPeriod,
   recordCost,
   readAllSharedContext,
 } from './db.js';
@@ -106,16 +107,37 @@ function checkFilesChanged(worktreePath, baseCommit) {
 function recordTaskCost(taskId, task, outputText) {
   try {
     const detailed = parseDetailedCost(outputText || '');
-    const actualCost = detailed.cost;
-    if (actualCost && actualCost > 0) {
-      recordActualCost(task.prompt, actualCost);
-      updateTask(taskId, { cost: actualCost });
+
+    if (isSubscriptionMode()) {
+      // Subscription: record tokens + duration, no dollar cost
+      const durationMs = task.startedAt ? Date.now() - new Date(task.startedAt).getTime() : null;
       const tier = classifyTier(task.prompt || '');
-      recordCost(taskId, task.project, actualCost, tier);
-      appendCostLog({
-        taskId, project: task.project || null, cost: actualCost, tier,
-        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+      recordCost(taskId, task.project, 0, tier, {
+        inputTokens: detailed.inputTokens,
+        outputTokens: detailed.outputTokens,
+        durationMs,
       });
+      appendCostLog({
+        taskId, project: task.project || null, cost: 0, tier,
+        inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+        durationMs,
+      });
+    } else {
+      // API mode: existing logic
+      const actualCost = detailed.cost;
+      if (actualCost && actualCost > 0) {
+        recordActualCost(task.prompt, actualCost);
+        updateTask(taskId, { cost: actualCost });
+        const tier = classifyTier(task.prompt || '');
+        recordCost(taskId, task.project, actualCost, tier, {
+          inputTokens: detailed.inputTokens,
+          outputTokens: detailed.outputTokens,
+        });
+        appendCostLog({
+          taskId, project: task.project || null, cost: actualCost, tier,
+          inputTokens: detailed.inputTokens, outputTokens: detailed.outputTokens,
+        });
+      }
     }
   } catch { /* ignore cost parsing errors */ }
 }
@@ -230,47 +252,80 @@ async function spawnWorker(task) {
 
   // 0. Pre-launch cost gate — check budget before creating worktree
   try {
-    const estimate = estimateTaskCost(task.prompt, task.retryCount || 0);
-    const estimatedCost = estimate.totalCost;
-    const now = new Date();
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-    const budgetScopes = ['global'];
-    if (task.project) budgetScopes.push(task.project);
-
-    for (const scope of budgetScopes) {
-      const budget = getBudget(scope);
-      if (!budget) continue;
-
-      const todaySpend = getCostForPeriod(scope, startOfToday, endOfDay);
-      const weekSpend = getCostForPeriod(scope, startOfWeek, endOfDay);
-      const monthSpend = getCostForPeriod(scope, startOfMonth, endOfDay);
-
-      const violations = [];
-      if (budget.dailyLimit != null && todaySpend + estimatedCost > budget.dailyLimit) {
-        violations.push(`daily ${scope}: $${todaySpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.dailyLimit.toFixed(2)}`);
+    if (isSubscriptionMode()) {
+      // Subscription mode: budget limits are task counts, not dollars
+      const budgetScopes = ['global'];
+      if (task.project) budgetScopes.push(task.project);
+      for (const scope of budgetScopes) {
+        const budget = getBudget(scope);
+        if (!budget) continue;
+        const { startOfToday, startOfWeek, startOfMonth, endOfDay } = getDateBoundaries();
+        const violations = [];
+        if (budget.dailyLimit != null) {
+          const count = getTaskCountForPeriod(scope, startOfToday, endOfDay);
+          if (count + 1 > budget.dailyLimit) violations.push(`daily tasks ${scope}: ${count}+1 > ${budget.dailyLimit}`);
+        }
+        if (budget.weeklyLimit != null) {
+          const count = getTaskCountForPeriod(scope, startOfWeek, endOfDay);
+          if (count + 1 > budget.weeklyLimit) violations.push(`weekly tasks ${scope}: ${count}+1 > ${budget.weeklyLimit}`);
+        }
+        if (budget.monthlyLimit != null) {
+          const count = getTaskCountForPeriod(scope, startOfMonth, endOfDay);
+          if (count + 1 > budget.monthlyLimit) violations.push(`monthly tasks ${scope}: ${count}+1 > ${budget.monthlyLimit}`);
+        }
+        if (violations.length > 0) {
+          const errorMsg = `Task limit exceeded: ${violations.join('; ')}`;
+          console.error(`[spawnWorker] Task limit blocked task ${taskId}: ${errorMsg}`);
+          updateTask(taskId, { status: 'failed', error: errorMsg, completedAt: new Date().toISOString() });
+          logEvent(taskId, 'budget_exceeded', errorMsg);
+          releaseTaskClaim(taskId);
+          return;
+        }
       }
-      if (budget.weeklyLimit != null && weekSpend + estimatedCost > budget.weeklyLimit) {
-        violations.push(`weekly ${scope}: $${weekSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.weeklyLimit.toFixed(2)}`);
-      }
-      if (budget.monthlyLimit != null && monthSpend + estimatedCost > budget.monthlyLimit) {
-        violations.push(`monthly ${scope}: $${monthSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.monthlyLimit.toFixed(2)}`);
-      }
+    } else {
+      // API mode: existing dollar-based budget gate
+      const estimate = estimateTaskCost(task.prompt, task.retryCount || 0);
+      const estimatedCost = estimate.totalCost;
+      const now = new Date();
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-      if (violations.length > 0) {
-        const errorMsg = `Budget exceeded: ${violations.join('; ')}`;
-        console.error(`[spawnWorker] Budget gate blocked task ${taskId}: ${errorMsg}`);
-        updateTask(taskId, {
-          status: 'failed',
-          error: errorMsg,
-          completedAt: new Date().toISOString(),
-        });
-        logEvent(taskId, 'budget_exceeded', errorMsg);
-        releaseTaskClaim(taskId);
-        return;
+      const budgetScopes = ['global'];
+      if (task.project) budgetScopes.push(task.project);
+
+      for (const scope of budgetScopes) {
+        const budget = getBudget(scope);
+        if (!budget) continue;
+
+        const todaySpend = getCostForPeriod(scope, startOfToday, endOfDay);
+        const weekSpend = getCostForPeriod(scope, startOfWeek, endOfDay);
+        const monthSpend = getCostForPeriod(scope, startOfMonth, endOfDay);
+
+        const violations = [];
+        if (budget.dailyLimit != null && todaySpend + estimatedCost > budget.dailyLimit) {
+          violations.push(`daily ${scope}: $${todaySpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.dailyLimit.toFixed(2)}`);
+        }
+        if (budget.weeklyLimit != null && weekSpend + estimatedCost > budget.weeklyLimit) {
+          violations.push(`weekly ${scope}: $${weekSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.weeklyLimit.toFixed(2)}`);
+        }
+        if (budget.monthlyLimit != null && monthSpend + estimatedCost > budget.monthlyLimit) {
+          violations.push(`monthly ${scope}: $${monthSpend.toFixed(2)} + $${estimatedCost.toFixed(2)} > $${budget.monthlyLimit.toFixed(2)}`);
+        }
+
+        if (violations.length > 0) {
+          const errorMsg = `Budget exceeded: ${violations.join('; ')}`;
+          console.error(`[spawnWorker] Budget gate blocked task ${taskId}: ${errorMsg}`);
+          updateTask(taskId, {
+            status: 'failed',
+            error: errorMsg,
+            completedAt: new Date().toISOString(),
+          });
+          logEvent(taskId, 'budget_exceeded', errorMsg);
+          releaseTaskClaim(taskId);
+          return;
+        }
       }
     }
   } catch (err) {

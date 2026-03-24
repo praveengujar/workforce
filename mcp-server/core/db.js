@@ -230,6 +230,18 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(8, new Date().toISOString());
     console.error('[db] Applied migration 8: baseCommit column');
   }
+
+  // Migration 9: token/duration columns on cost_history for subscription mode
+  const m9 = db.prepare('SELECT version FROM schema_migrations WHERE version = 9').get();
+  if (!m9) {
+    try {
+      db.exec("ALTER TABLE cost_history ADD COLUMN inputTokens INTEGER");
+      db.exec("ALTER TABLE cost_history ADD COLUMN outputTokens INTEGER");
+      db.exec("ALTER TABLE cost_history ADD COLUMN durationMs INTEGER");
+    } catch { /* columns may already exist */ }
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(9, new Date().toISOString());
+    console.error('[db] Applied migration 9: token/duration columns on cost_history');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,11 +392,37 @@ export function setBudget(scope, { dailyLimit, weeklyLimit, monthlyLimit }) {
 // Cost history
 // ---------------------------------------------------------------------------
 
-export function recordCost(taskId, project, cost, tier) {
+export function recordCost(taskId, project, cost, tier, extras = {}) {
   const now = new Date().toISOString();
   stmt(
-    'INSERT INTO cost_history (taskId, project, cost, tier, recordedAt) VALUES (?, ?, ?, ?, ?)',
-  ).run(taskId, project ?? null, cost, tier ?? null, now);
+    'INSERT INTO cost_history (taskId, project, cost, tier, inputTokens, outputTokens, durationMs, recordedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(taskId, project ?? null, cost, tier ?? null, extras.inputTokens ?? null, extras.outputTokens ?? null, extras.durationMs ?? null, now);
+}
+
+export function getTaskCountForPeriod(scope, startDate, endDate) {
+  if (scope === 'global') {
+    const row = stmt(
+      'SELECT COUNT(*) AS total FROM cost_history WHERE recordedAt >= ? AND recordedAt <= ?',
+    ).get(startDate, endDate);
+    return row?.total ?? 0;
+  }
+  const row = stmt(
+    'SELECT COUNT(*) AS total FROM cost_history WHERE project = ? AND recordedAt >= ? AND recordedAt <= ?',
+  ).get(scope, startDate, endDate);
+  return row?.total ?? 0;
+}
+
+export function getTokensForPeriod(scope, startDate, endDate) {
+  if (scope === 'global') {
+    const row = stmt(
+      'SELECT COALESCE(SUM(inputTokens), 0) AS totalInput, COALESCE(SUM(outputTokens), 0) AS totalOutput FROM cost_history WHERE recordedAt >= ? AND recordedAt <= ?',
+    ).get(startDate, endDate);
+    return { input: row?.totalInput ?? 0, output: row?.totalOutput ?? 0 };
+  }
+  const row = stmt(
+    'SELECT COALESCE(SUM(inputTokens), 0) AS totalInput, COALESCE(SUM(outputTokens), 0) AS totalOutput FROM cost_history WHERE project = ? AND recordedAt >= ? AND recordedAt <= ?',
+  ).get(scope, startDate, endDate);
+  return { input: row?.totalInput ?? 0, output: row?.totalOutput ?? 0 };
 }
 
 export function getCostForPeriod(scope, startDate, endDate) {

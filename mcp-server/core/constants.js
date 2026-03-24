@@ -47,3 +47,7 @@ export function getDateBoundaries() {
     endOfDay: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString(),
   };
 }
+
+export function isSubscriptionMode() {
+  return (process.env.WORKFORCE_BILLING_MODE || 'subscription') !== 'api';
+}

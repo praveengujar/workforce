@@ -5,7 +5,7 @@
 
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { DATA_DIR } from '../core/constants.js';
+import { DATA_DIR, isSubscriptionMode } from '../core/constants.js';
 const CONFIG_PATH = join(DATA_DIR, 'cost-policy.json');
 
 const DEFAULT_POLICY = {
@@ -65,6 +65,10 @@ export function saveCostPolicy(policy) {
  * @returns {{ decision: 'approved'|'needs_confirmation'|'rejected', reason: string }}
  */
 export function evaluateTaskCost(estimatedCost, dailySpendSoFar, policy = null) {
+  if (isSubscriptionMode()) {
+    return { decision: 'approved', reason: 'Subscription mode — no cost approval needed' };
+  }
+
   if (!policy) policy = loadCostPolicy();
   if (!policy.enabled) {
     return { decision: 'approved', reason: 'Cost policy disabled' };

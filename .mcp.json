@@ -6,7 +6,8 @@
       "env": {
         "WORKFORCE_DATA_DIR": "${CLAUDE_PLUGIN_DATA}",
         "WORKFORCE_MAX_CONCURRENT": "10",
-        "WORKFORCE_TASK_TIMEOUT": "600000"
+        "WORKFORCE_TASK_TIMEOUT": "600000",
+        "WORKFORCE_BILLING_MODE": "subscription"
       }
     },
     "playwright": {

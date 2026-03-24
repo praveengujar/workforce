@@ -1,9 +1,15 @@
 import { classifyTier, estimateCost as baseEstimate } from './cost-model.js';
+import { isSubscriptionMode } from './constants.js';
 
 const CACHE_OVERHEAD = 0.10;
 const RETRY_OVERHEAD = 0.05;
 
 export function estimateTaskCost(prompt, retryCount = 0) {
+  if (isSubscriptionMode()) {
+    const tier = classifyTier(prompt);
+    return { tier, baseCost: 0, adjustments: {}, totalCost: 0 };
+  }
+
   const tier = classifyTier(prompt);
   const baseCost = baseEstimate(prompt);
 

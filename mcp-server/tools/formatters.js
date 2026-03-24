@@ -162,8 +162,12 @@ export function formatHealthMetrics(metrics, costSummary) {
     }
   }
 
-  // Cost section
-  if (costSummary) {
+  // Cost / usage section
+  if (costSummary && costSummary.mode === 'subscription') {
+    lines.push('');
+    lines.push('  \u2500\u2500\u2500 usage \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+    lines.push(`  Today ${costSummary.today} tasks \u2502 Week ${costSummary.thisWeek} tasks \u2502 Month ${costSummary.thisMonth} tasks`);
+  } else if (costSummary) {
     lines.push('');
     lines.push('  \u2500\u2500\u2500 cost \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
     lines.push(`  Today ${dollar(costSummary.today)} \u2502 Week ${dollar(costSummary.thisWeek)} \u2502 Month ${dollar(costSummary.thisMonth)}`);
@@ -183,6 +187,26 @@ export function formatHealthMetrics(metrics, costSummary) {
 export function formatCostSummary(costSummary) {
   if (!costSummary) return 'No cost data available.';
 
+  if (costSummary.mode === 'subscription') {
+    const lines = [];
+    lines.push('\u2501\u2501\u2501 USAGE SUMMARY \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
+    lines.push('');
+    lines.push(`  Today:      ${costSummary.today} tasks`);
+    lines.push(`  This week:  ${costSummary.thisWeek} tasks`);
+    lines.push(`  This month: ${costSummary.thisMonth} tasks`);
+    lines.push('');
+    lines.push('  BY TIER');
+    lines.push(`  Simple: ${costSummary.byTier?.simple || 0}  Medium: ${costSummary.byTier?.medium || 0}  Complex: ${costSummary.byTier?.complex || 0}`);
+    if (costSummary.avgDurationMs > 0) {
+      const avgMin = Math.round(costSummary.avgDurationMs / 60000);
+      const avgSec = Math.round((costSummary.avgDurationMs % 60000) / 1000);
+      lines.push('');
+      lines.push(`  Avg duration: ${avgMin}m ${avgSec}s`);
+    }
+    return lines.join('\n');
+  }
+
+  // API mode: existing code below
   const lines = [];
   lines.push('\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510');
   lines.push('\u2502  COST SUMMARY' + ' '.repeat(26) + '\u2502');

@@ -12,6 +12,7 @@ import { estimateTaskCost } from './task-cost.js';
 import { capturePane, killSession, hasSession } from './tmux.js';
 import { cancelTask as cancelTaskToken } from './project-state.js';
 import { parseDetailedCost } from './cost-tracker.js';
+import { isSubscriptionMode } from './constants.js';
 
 const COST_MULTIPLIER_LIMIT = 2.0;   // Kill if actual > 2x estimated
 const SCAN_INTERVAL_MS = 15_000;      // Check every 15 seconds
@@ -23,6 +24,8 @@ let _intervalId = null;
  * Returns array of actions taken.
  */
 export function runCostWatchdogScan() {
+  if (isSubscriptionMode()) return [];
+
   const running = getRunningTasks();
   const actions = [];
 
