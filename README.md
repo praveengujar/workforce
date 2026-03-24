@@ -1,4 +1,4 @@
-# Workforce
+# Workforce v1.4.0
 
 A Claude Code plugin that turns Claude into a task orchestrator — spawning autonomous agent sessions in isolated git worktrees, managing their lifecycle, and merging results back to the target branch.
 
@@ -60,6 +60,9 @@ Once installed, use these slash commands inside Claude Code:
 /workforce-backlog                  # Manage work items
 /workforce-health                   # Performance metrics and cost tracking
 /workforce-decompose "big task"     # Break complex work into subtasks
+/workforce-rescue                   # Diagnose and recover failed tasks
+/workforce-chain                    # Create sequential task chains
+/workforce-experiment               # Run iterative optimization experiments
 ```
 
 ## How it works
@@ -81,6 +84,23 @@ pending → running → review → merging → done
 3. **Review**: When the agent finishes and files changed, the task enters review. You see the diff and approve or reject.
 4. **Merge**: On approval, changes merge to the target branch with a per-repo lock to prevent conflicts between concurrent tasks.
 5. **Cleanup**: Worktree and branch are removed. Task auto-archives after 5 minutes.
+
+### Task types
+
+| Type | Zero-work guard | Output | Use case |
+|------|----------------|--------|----------|
+| `standard` | Active — fails if no changes | Code changes | Default for all tasks |
+| `analysis` | Skipped — succeeds on output | Findings report | Investigation, debugging, cross-cutting analysis |
+| `experiment` | N/A | Iterative results | Optimization, parameter tuning |
+
+### Analyze-then-fix
+
+For complex bugs where agents struggle (missing symmetric logic, cache/state issues, absent code paths), use the two-phase pattern:
+
+1. **Phase 1**: Analysis task (`task_type: "analysis"`) investigates and produces structured findings
+2. **Phase 2+**: Targeted fix tasks depend on the analysis, each addressing one specific finding
+
+The analysis task's full output is automatically injected into downstream fix tasks via the dependency chain. Use `/workforce-decompose` to set this up.
 
 ### Recovery engine
 
@@ -115,7 +135,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
 ├── mcp-server/
-│   ├── index.js                   # Entry point — registers 36 MCP tools
+│   ├── index.js                   # Entry point — registers 37 MCP tools
 │   ├── package.json               # Dependencies (@modelcontextprotocol/sdk)
 │   ├── core/
 │   │   ├── db.js                  # SQLite database (tasks, events, workers, claims)
@@ -141,10 +161,28 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   ├── workforce-review/SKILL.md  # Diff review + approve/reject
 │   ├── workforce-backlog/SKILL.md # Backlog management
 │   ├── workforce-health/SKILL.md  # Health + cost metrics
-│   └── workforce-decompose/SKILL.md  # Task decomposition
+│   ├── workforce-decompose/SKILL.md  # Task decomposition + analyze-then-fix
+│   ├── workforce-rescue/SKILL.md    # Diagnose and recover failed tasks
+│   ├── workforce-chain/SKILL.md     # Sequential task chains
+│   ├── workforce-experiment/SKILL.md # Iterative optimization
+│   ├── workforce-sprint/SKILL.md    # Batch launch from backlog
+│   ├── workforce-release/SKILL.md   # Release notes + changelog
+│   ├── workforce-qa/SKILL.md        # E2E test generation
+│   ├── workforce-merge/SKILL.md     # Conflict-aware merge
+│   ├── workforce-rubberduck/SKILL.md # Prompt refinement
+│   ├── workforce-test-plan/SKILL.md # Test plan generation
+│   ├── workforce-pipeline/SKILL.md  # Full orchestration pipeline
+│   ├── workforce-gate-status/SKILL.md # Quality gate status
+│   ├── workforce-cleanup/SKILL.md   # Bulk cleanup
+│   └── workforce-version/SKILL.md   # Version info
 ├── agents/
 │   ├── task-planner.md            # Decomposes complex prompts into subtasks
-│   └── backlog-analyst.md         # Prioritizes and stack-ranks backlog items
+│   ├── backlog-analyst.md         # Prioritizes and stack-ranks backlog items
+│   ├── experiment-researcher.md   # Iterative code experiments
+│   ├── failure-forensics.md       # Deep failure investigation
+│   ├── release-manager.md         # Release preparation
+│   ├── qa-engineer.md             # E2E test writing with Playwright
+│   └── requirements-analyst.md    # Deep-dive requirements analysis
 └── hooks/
     ├── hooks.json                 # SessionStart hook config
     └── startup.js                 # Prune worktrees, abort stale merges
@@ -156,7 +194,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 
 | Tool | Description |
 |------|-------------|
-| `workforce_create_task` | Create a new task (prompt, project, profile, autoMerge) |
+| `workforce_create_task` | Create a new task (prompt, project, autoMerge, task_type, depends_on, group, phase) |
 | `workforce_list_tasks` | List tasks with optional status filter |
 | `workforce_get_task` | Get details for a specific task |
 | `workforce_cancel_task` | Cancel a running task, kill process, cleanup |
@@ -185,12 +223,24 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | `workforce_backlog_update` | Update an existing item |
 | `workforce_backlog_delete` | Remove an item |
 
+### Dependencies & context
+
+| Tool | Description |
+|------|-------------|
+| `workforce_task_dependencies` | View dependency graph for a task |
+| `workforce_write_context` | Write shared context for a task group |
+| `workforce_read_context` | Read shared context for a task group |
+| `workforce_group_status` | Status of all tasks in a group |
+
 ### Monitoring
 
 | Tool | Description |
 |------|-------------|
 | `workforce_health_metrics` | Success/failure/retry rates, suggestions |
 | `workforce_cost_summary` | Cost breakdown by period and tier |
+| `workforce_cost_log` | Detailed cost log entries |
+| `workforce_cost_watchdog_scan` | Manual cost watchdog scan |
+| `workforce_cleanup` | Bulk cleanup of old/stuck tasks |
 
 ## Database
 
