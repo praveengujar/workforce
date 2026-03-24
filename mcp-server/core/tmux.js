@@ -13,9 +13,31 @@ export function isTmuxAvailable() {
   return _tmuxAvailable;
 }
 
+// Env vars that must be explicitly exported inside tmux sessions.
+// tmux sessions inherit env from the tmux SERVER (started once), not from
+// the client that creates them — so auth-critical vars must be exported
+// as shell commands inside the session.
+const FORWARD_ENV_PREFIXES = ['CLAUDE_', 'ANTHROPIC_'];
+const FORWARD_ENV_NAMES = new Set([
+  'HOME', 'PATH', 'USER', 'SHELL', 'LANG',
+  'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+]);
+
+function getForwardedEnv() {
+  const result = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (FORWARD_ENV_NAMES.has(key) || FORWARD_ENV_PREFIXES.some(p => key.startsWith(p))) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export function createSession(name, command, cwd, env = {}) {
   const mergedEnv = { ...process.env, ...env };
-  const envPrefix = Object.entries(env)
+  // Merge forwarded process.env vars with task-specific overrides
+  const exportVars = { ...getForwardedEnv(), ...env };
+  const envPrefix = Object.entries(exportVars)
     .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
     .join('; ');
   // Append "; exit" so the tmux session terminates when the command finishes.
