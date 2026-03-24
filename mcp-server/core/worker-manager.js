@@ -339,10 +339,12 @@ async function spawnWorker(task) {
     if (task.dependsOn) {
       try {
         const deps = JSON.parse(task.dependsOn);
-        if (deps.length > 0) {
-          const upstreamTask = getTask(deps[0]);
-          if (upstreamTask && upstreamTask.branch) {
+        for (const depId of deps) {
+          const upstreamTask = getTask(depId);
+          // Skip analysis tasks — they produce no branch (worktree is cleaned up)
+          if (upstreamTask && upstreamTask.branch && upstreamTask.taskType !== 'analysis') {
             baseBranch = upstreamTask.branch;
+            break;
           }
         }
       } catch { /* ignore parse errors — fall back to HEAD */ }
