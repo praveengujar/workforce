@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import {
   getAllTasks, getTask, createTask as dbCreateTask, updateTask,
   getRunningTasks, releaseTaskClaim, removeWorker,
@@ -27,6 +27,9 @@ import { DATA_DIR, ensureDir } from '../core/constants.js';
 export async function createTaskHandler({ prompt, project, autoMerge, parent_id, depends_on, group, phase, task_type }) {
   if (!prompt) throw new Error('prompt is required');
 
+  // Default project from cwd basename if not provided (ensures session context injection)
+  const effectiveProject = project || basename(process.cwd()) || 'default';
+
   // Validate depends_on references exist
   if (depends_on && Array.isArray(depends_on)) {
     for (const depId of depends_on) {
@@ -36,7 +39,7 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
   }
 
   const id = randomUUID();
-  let task = dbCreateTask({ id, prompt, project });
+  let task = dbCreateTask({ id, prompt, project: effectiveProject });
 
   // Set optional fields that createTask doesn't handle directly
   const extras = {};

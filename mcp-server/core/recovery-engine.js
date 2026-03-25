@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { getAllTasks, updateTask } from './db.js';
 import { logEvent } from './task-events.js';
+import { createEval } from './eval-engine.js';
 
 const SCAN_INTERVAL_MS = 30_000;
 const ZOMBIE_THRESHOLD_MS = 60 * 60 * 1000;
@@ -47,6 +48,7 @@ function rule0aZombieRetry(task) {
   if (Date.now() - startedAt < ZOMBIE_THRESHOLD_MS) return false;
   updateTask(task.id, { status: 'failed', error: 'Zombie retry: running with no session for >3 min', completedAt: new Date().toISOString() });
   logEvent(task.id, 'failed', 'Rule 0a: zombie retry detected');
+  try { createEval({ taskId: task.id, category: 'infrastructure', whatHappened: 'Zombie process: running with no active session for >3 min', detection: 'auto_recovery', severity: 'medium' }); } catch { /* ignore */ }
   return true;
 }
 
@@ -80,6 +82,7 @@ function rule1GhostRunner(task) {
   if (!isPidAlive(task.pid)) {
     updateTask(task.id, { status: 'failed', error: `Ghost runner: PID ${task.pid} dead`, completedAt: new Date().toISOString() });
     logEvent(task.id, 'failed', `Rule 1: ghost runner — PID ${task.pid} dead`);
+    try { createEval({ taskId: task.id, category: 'infrastructure', whatHappened: `Ghost runner: PID ${task.pid} died unexpectedly`, detection: 'auto_recovery', severity: 'medium' }); } catch { /* ignore */ }
     return true;
   }
   return false;
@@ -116,6 +119,7 @@ function rules4and5StaleOrRateLimit(task) {
   const retryAfter = new Date(Date.now() + RETRY_BACKOFF_MS * (retryCount + 1)).toISOString();
   updateTask(task.id, { status: 'pending', retryCount: retryCount + 1, error: null, retryAfter });
   logEvent(task.id, 'retry', `Rules 4-5: ${reason} — retry ${retryCount + 1}/${maxRetries}`);
+  try { createEval({ taskId: task.id, category: 'rate_limit', whatHappened: `${reason} — retry ${retryCount + 1}/${maxRetries}`, detection: 'auto_recovery', severity: 'low' }); } catch { /* ignore */ }
   return true;
 }
 

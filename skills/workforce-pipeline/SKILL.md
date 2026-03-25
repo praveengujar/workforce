@@ -8,12 +8,34 @@ When the user invokes /workforce-pipeline, orchestrate a complete task lifecycle
 ## Pipeline Stages
 
 ```
-rubberduck → launch → [agent codes] → test plan → QA → human review → merge
+pre-scan → rubberduck → launch → [agent codes] → test plan → QA → human review → merge
 ```
 
 Each stage is optional and skippable. The pipeline adapts based on task complexity.
 
 ## Steps
+
+### Stage 0: Pre-scan (always runs, ~5 seconds)
+1. Call `workforce_dependency_graph` with action `build` to ensure the graph is fresh
+2. Extract file paths from the prompt
+3. Call `workforce_get_rules_for_path` with those paths to check applicable rules
+4. Call `workforce_dependency_graph` with action `query_impact` for each mentioned file
+5. Calculate impact radius (total affected files across all queries)
+6. Present the pre-scan summary:
+
+```
+━━━ PRE-SCAN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Files mentioned:    {count}
+Impact radius:      {total_affected} files
+Applicable rules:   {rule_count}
+Risk:               {LOW|MEDIUM|HIGH}
+Recommendation:     {proceed|decompose|review rules first}
+```
+
+Decision logic:
+- Impact radius > 20 files: recommend decomposition via `/workforce-decompose`
+- Rules exist with priority >= 7: include them as constraints in the prompt
+- No rules for critical paths: flag as a gap, suggest `/workforce-rules` to add
 
 ### Stage 1: Rubberduck (skip for simple/○ tasks)
 1. Run the rubberduck analysis (same as /workforce-rubberduck)
@@ -67,9 +89,9 @@ Update this status card as each stage completes.
 
 ## Adaptive Behavior
 
-- **Simple tasks (○ tier, <$0.10)**: Skip rubberduck and test plan. Launch → Review → Merge.
-- **Medium tasks (● tier, $0.10-$0.50)**: Skip rubberduck. Launch → Test Plan → QA → Review → Merge.
-- **Complex tasks (◉ tier, >$0.50)**: Full pipeline. Rubberduck → Launch → Test Plan → QA → Review → Merge.
+- **Simple tasks (○ tier, <$0.10)**: Pre-scan → Launch → Review → Merge.
+- **Medium tasks (● tier, $0.10-$0.50)**: Pre-scan → Launch → Test Plan → QA → Review → Merge.
+- **Complex tasks (◉ tier, >$0.50)**: Pre-scan → Rubberduck → Launch → Test Plan → QA → Review → Merge.
 - **User override**: "skip QA", "skip rubberduck" — honor immediately.
 
 ## Error Handling

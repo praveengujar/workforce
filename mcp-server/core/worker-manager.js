@@ -12,6 +12,10 @@ import { spawn } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -48,6 +52,8 @@ import {
 import { recordActualCost, classifyTier } from './cost-model.js';
 import { estimateTaskCost } from './task-cost.js';
 import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
+import { getRulesForPaths, getRulesForKeywords, extractPathsFromText } from './knowledge-rules.js';
+import { getAllSessionContext } from './session-context.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -407,7 +413,7 @@ ${effectivePrompt}`;
   try {
     const gitLog = gitExec(['log', '--oneline', '-5'], { cwd: repoRoot });
     if (gitLog) {
-      effectivePrompt += `\n\n[Context] Recent commits:\n${gitLog}`;
+      effectivePrompt += `\n\n[Context — Trust: HIGH] Recent commits:\n${gitLog}`;
     }
   } catch {
     // ignore
@@ -417,9 +423,10 @@ ${effectivePrompt}`;
   try {
     const memoryPath = join(repoRoot, '.claude', 'project-memory.md');
     if (existsSync(memoryPath)) {
-      const memory = readFileSync(memoryPath, 'utf8').trim();
+      let memory = readFileSync(memoryPath, 'utf8').trim();
       if (memory) {
-        effectivePrompt += `\n\n[Project Memory]\n${memory}`;
+        if (memory.length > 2000) memory = '...(truncated)\n' + memory.slice(-2000);
+        effectivePrompt += `\n\n[Project Memory — Trust: LOW]\n${memory}`;
       }
     }
   } catch {
@@ -430,13 +437,26 @@ ${effectivePrompt}`;
   try {
     const feedbackPath = join(DATA_DIR, 'feedback.jsonl');
     if (existsSync(feedbackPath)) {
-      const lines = readFileSync(feedbackPath, 'utf8').trim().split('\n').filter(Boolean);
+      const stat = statSync(feedbackPath);
+      let rawText;
+      if (stat.size > 102400) {
+        // Large file: read only the last 10KB to avoid blocking on huge files
+        const fd = openSync(feedbackPath, 'r');
+        const buf = Buffer.alloc(10240);
+        readSync(fd, buf, 0, 10240, stat.size - 10240);
+        closeSync(fd);
+        rawText = buf.toString('utf8');
+      } else {
+        rawText = readFileSync(feedbackPath, 'utf8');
+      }
+      const lines = rawText.trim().split('\n').filter(Boolean);
       const recent = lines.slice(-5);
       const examples = recent
         .map((line) => {
           try {
             const fb = JSON.parse(line);
-            return `  - [${fb.type}] ${fb.prompt}`;
+            const base = `  - [${fb.type}] ${fb.prompt}`;
+            return fb.correction ? `${base} -> Fix: ${fb.correction}` : base;
           } catch {
             return null;
           }
@@ -485,6 +505,62 @@ ${effectivePrompt}`;
         effectivePrompt += `\n\n[Shared Context]\n${capped}`;
       }
     } catch { /* ignore */ }
+  }
+
+  // Layer 7: Applicable knowledge rules (path-scoped + keyword-matched)
+  try {
+    const mentionedPaths = extractPathsFromText(task.prompt);
+    // Path-based matching (explicit file references in prompt)
+    let rules = mentionedPaths.length > 0 ? getRulesForPaths(mentionedPaths) : [];
+    // Keyword-based matching (high-level prompts without file paths)
+    if (rules.length === 0) {
+      rules = getRulesForKeywords(task.prompt);
+    }
+    if (rules.length > 0) {
+      // Deduplicate by rule ID
+      const seen = new Set();
+      const unique = rules.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+      let rulesBlock = '';
+      for (const rule of unique) {
+        const entry = `[${rule.category}] ${rule.name} (priority ${rule.priority})\n${rule.content}\n`;
+        if (rulesBlock.length + entry.length > 3000) break; // cap injection size
+        rulesBlock += entry + '\n';
+      }
+      if (rulesBlock) {
+        effectivePrompt += `\n\n[Knowledge Rules — Trust: MEDIUM]\n${rulesBlock.trim()}`;
+      }
+    }
+  } catch {
+    // ignore knowledge rules errors
+  }
+
+  // Layer 8: Session context (cross-session continuity)
+  if (task.project) {
+    try {
+      const SESSION_CTX_BUDGET = 1500;
+      let ctxBlock = '';
+
+      // Single query — extract active_focus from results (avoids double DB round-trip)
+      const contextEntries = getAllSessionContext(task.project);
+      const focusEntry = contextEntries.find(e => e.key === 'active_focus');
+      if (focusEntry) {
+        ctxBlock += `ACTIVE FOCUS: ${focusEntry.value}\n`;
+      }
+
+      // Fill remaining budget with other entries (recency-ordered, whole entries only)
+      for (const e of contextEntries) {
+        if (e.key === 'active_focus') continue;
+        const line = `${e.key}: ${e.value}\n`;
+        if (ctxBlock.length + line.length > SESSION_CTX_BUDGET) break; // evict whole entry, don't slice
+        ctxBlock += line;
+      }
+
+      if (ctxBlock) {
+        effectivePrompt += `\n\n[Session Context — Trust: LOW]\n${ctxBlock.trim()}`;
+      }
+    } catch {
+      // ignore session context errors
+    }
   }
 
   // 3. Spawn Claude CLI

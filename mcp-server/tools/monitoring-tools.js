@@ -7,6 +7,7 @@ import { getAllTasks } from '../core/db.js';
 import { classifyTier } from '../core/cost-model.js';
 import { runRecoveryScan } from '../core/recovery-engine.js';
 import { getDateBoundaries, isSubscriptionMode } from '../core/constants.js';
+import { getEvalStats } from '../core/eval-engine.js';
 
 // ---------------------------------------------------------------------------
 // healthMetricsHandler
@@ -37,6 +38,10 @@ export function healthMetricsHandler() {
   if (oneShotRate < 0.5) suggestions.push('Low one-shot rate -- consider more specific prompts');
   if (retryRate > 0.4) suggestions.push('Many retries -- check for flaky tests or merge conflicts');
 
+  // Eval stats
+  let evalStats = null;
+  try { evalStats = getEvalStats(); } catch { /* eval table may not exist yet */ }
+
   return {
     doneRate: Math.round(doneRate * 100) / 100,
     failRate: Math.round(failRate * 100) / 100,
@@ -48,6 +53,7 @@ export function healthMetricsHandler() {
     recentTasks,
     total,
     improvementSuggestions: suggestions,
+    evalStats,
   };
 }
 

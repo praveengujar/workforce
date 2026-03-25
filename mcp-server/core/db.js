@@ -11,7 +11,7 @@ const LEGACY_DB_PATH = join(homedir(), '.claude', 'tasks', 'claude-agents.db');
 // ---------------------------------------------------------------------------
 const _stmtCache = new Map();
 
-function stmt(sql) {
+export function stmt(sql) {
   const db = getDb();
   if (_stmtCache.has(sql)) return _stmtCache.get(sql);
   const s = db.prepare(sql);
@@ -241,6 +241,73 @@ function _applySchema(db) {
     } catch { /* columns may already exist */ }
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(9, new Date().toISOString());
     console.error('[db] Applied migration 9: token/duration columns on cost_history');
+  }
+
+  // Migration 10: knowledge rules for context management
+  const m10 = db.prepare('SELECT version FROM schema_migrations WHERE version = 10').get();
+  if (!m10) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_rules (
+        id          TEXT PRIMARY KEY,
+        category    TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        description TEXT,
+        paths       TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        priority    INTEGER NOT NULL DEFAULT 5,
+        createdAt   TEXT NOT NULL,
+        updatedAt   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_knowledge_rules_category ON knowledge_rules(category);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_rules_cat_name ON knowledge_rules(category, name);
+    `);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(10, new Date().toISOString());
+    console.error('[db] Applied migration 10: knowledge_rules table');
+  }
+
+  // Migration 11: eval logs for self-improving feedback loop
+  const m11 = db.prepare('SELECT version FROM schema_migrations WHERE version = 11').get();
+  if (!m11) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS eval_logs (
+        id              TEXT PRIMARY KEY,
+        taskId          TEXT,
+        category        TEXT NOT NULL,
+        ruleViolated    TEXT,
+        whatHappened     TEXT NOT NULL,
+        rootCause       TEXT,
+        correctApproach TEXT,
+        preventiveUpdate TEXT,
+        detection       TEXT NOT NULL,
+        severity        TEXT NOT NULL DEFAULT 'medium',
+        processedAt     TEXT,
+        processedAction TEXT,
+        createdAt       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_eval_logs_taskId ON eval_logs(taskId);
+      CREATE INDEX IF NOT EXISTS idx_eval_logs_category ON eval_logs(category);
+      CREATE INDEX IF NOT EXISTS idx_eval_logs_processedAt ON eval_logs(processedAt);
+    `);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(11, new Date().toISOString());
+    console.error('[db] Applied migration 11: eval_logs table');
+  }
+
+  // Migration 12: session context for cross-session continuity
+  const m12 = db.prepare('SELECT version FROM schema_migrations WHERE version = 12').get();
+  if (!m12) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_context (
+        id        TEXT PRIMARY KEY,
+        project   TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        value     TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(project, key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_context_project ON session_context(project);
+    `);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(12, new Date().toISOString());
+    console.error('[db] Applied migration 12: session_context table');
   }
 }
 

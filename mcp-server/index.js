@@ -3,7 +3,7 @@
 /**
  * Workforce MCP Server — stdio transport.
  *
- * Exposes 36 tools for managing autonomous Claude Code agent sessions.
+ * Exposes 48 tools for managing autonomous Claude Code agent sessions.
  * Replaces the Express+WebSocket backend with a single MCP server process.
  */
 
@@ -64,6 +64,23 @@ import {
   taskDependenciesHandler, groupStatusHandler,
 } from './tools/context-tools.js';
 
+import {
+  createRuleHandler, listRulesHandler,
+  getRulesForPathHandler, deleteRuleHandler,
+} from './tools/knowledge-tools.js';
+
+import {
+  createEvalHandler, listEvalsHandler, processEvalHandler,
+} from './tools/eval-tools.js';
+
+import {
+  sessionContextHandler, activeFocusHandler,
+} from './tools/session-tools.js';
+
+import {
+  dependencyGraphHandler, setGraphProjectDir,
+} from './tools/graph-tools.js';
+
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
 import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
@@ -71,7 +88,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '1.4.0';
+const WORKFORCE_VERSION = '2.0.0';
 
 const server = new McpServer({
   name: 'workforce',
@@ -477,6 +494,134 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Knowledge Rules Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_create_rule',
+  'Create a path-scoped knowledge rule. Rules encode domain knowledge (standards, patterns, anti-patterns) that gets injected into agent prompts when they work on matching files.',
+  {
+    category: z.enum(['standards', 'architecture', 'testing', 'security', 'workflow', 'patterns', 'custom']).describe('Rule category'),
+    name: z.string().describe('Short rule name (e.g., "auth-jwt-validation")'),
+    description: z.string().optional().describe('One-line description of what this rule covers'),
+    paths: z.array(z.string()).describe('Array of glob patterns for path scoping (e.g., ["src/auth/**", "*.test.ts"])'),
+    content: z.string().describe('The actual knowledge/standard to inject into agent context'),
+    priority: z.number().optional().describe('Priority 1-10, higher = injected first (default: 5)'),
+  },
+  wrap(createRuleHandler),
+);
+
+server.tool(
+  'workforce_list_rules',
+  'List all knowledge rules, optionally filtered by category.',
+  {
+    category: z.enum(['standards', 'architecture', 'testing', 'security', 'workflow', 'patterns', 'custom']).optional().describe('Filter by category'),
+  },
+  wrap(listRulesHandler),
+);
+
+server.tool(
+  'workforce_get_rules_for_path',
+  'Get all knowledge rules that apply to the given file paths (audit mapping). Returns rules whose glob patterns match any of the input paths.',
+  {
+    paths: z.array(z.string()).describe('Array of file paths to check against rules'),
+  },
+  wrap(getRulesForPathHandler),
+);
+
+server.tool(
+  'workforce_delete_rule',
+  'Delete a knowledge rule by ID.',
+  {
+    id: z.string().describe('Rule ID to delete'),
+  },
+  wrap(deleteRuleHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Eval & Feedback Loop Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_create_eval',
+  'Create an eval log entry for a task failure. Part of the self-improving feedback loop.',
+  {
+    task_id: z.string().optional().describe('Task ID that failed'),
+    category: z.enum(['pattern_violation', 'infrastructure', 'prompt_quality', 'scope_creep', 'rate_limit', 'environment', 'zero_work', 'merge_failure', 'dependency_failure', 'custom']).describe('Failure category'),
+    rule_violated: z.string().optional().describe('Rule file path that should have prevented this, or "NO RULE EXISTS"'),
+    what_happened: z.string().describe('Description of what went wrong'),
+    root_cause: z.string().optional().describe('Why the system did not prevent this'),
+    correct_approach: z.string().optional().describe('What should have been done instead'),
+    preventive_update: z.string().optional().describe('JSON: {category, name, paths, content} for auto-creating a knowledge rule'),
+    detection: z.enum(['auto_recovery', 'session_end_hook', 'manual_review', 'qa_failure']).describe('How this failure was detected'),
+    severity: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('Severity level (default: medium)'),
+  },
+  wrap(createEvalHandler),
+);
+
+server.tool(
+  'workforce_list_evals',
+  'List eval log entries with optional filters. Shows the self-improving feedback loop state.',
+  {
+    task_id: z.string().optional().describe('Filter by task ID'),
+    category: z.string().optional().describe('Filter by category'),
+    unprocessed_only: z.boolean().optional().describe('Only show unprocessed evals (default: false)'),
+    limit: z.number().optional().describe('Max entries to return (default: 50)'),
+  },
+  wrap(listEvalsHandler),
+);
+
+server.tool(
+  'workforce_process_eval',
+  'Process an eval entry — create a knowledge rule, update memory, or dismiss.',
+  {
+    id: z.string().describe('Eval ID to process'),
+    action: z.enum(['rule_created', 'rule_updated', 'memory_updated', 'dismissed']).describe('Processing action'),
+  },
+  wrap(processEvalHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Session Context Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_session_context',
+  'Read/write session context for cross-session continuity. Persists active focus, known issues, and investigation notes.',
+  {
+    project: z.string().describe('Project name'),
+    action: z.enum(['get', 'set', 'list', 'clear']).describe('Action to perform'),
+    key: z.string().optional().describe('Context key (required for get/set, optional for clear)'),
+    value: z.string().optional().describe('Context value (required for set)'),
+  },
+  wrap(sessionContextHandler),
+);
+
+server.tool(
+  'workforce_active_focus',
+  'Get the active focus and session context summary for a project.',
+  {
+    project: z.string().describe('Project name'),
+  },
+  wrap(activeFocusHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Dependency Graph Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_dependency_graph',
+  'Build and query the import dependency graph for impact analysis. Build first, then query.',
+  {
+    action: z.enum(['build', 'query_impact', 'query_dependencies', 'stats']).describe('Action: build the graph, query impact (reverse deps), query dependencies (forward deps), or get stats'),
+    path: z.string().optional().describe('File path to query (required for query_impact and query_dependencies)'),
+    project_dir: z.string().optional().describe('Project directory (default: cwd)'),
+  },
+  wrap(dependencyGraphHandler),
+);
+
+// ---------------------------------------------------------------------------
 // Initialization and startup
 // ---------------------------------------------------------------------------
 
@@ -498,6 +643,7 @@ async function main() {
   setRecoveryProjectDir(projectDir);
   setLifecycleProjectDir(projectDir);
   setExperimentProjectDir(projectDir);
+  setGraphProjectDir(projectDir);
 
   // 4. Initialize worker manager (starts promote loop)
   initWorkerManager(projectDir);

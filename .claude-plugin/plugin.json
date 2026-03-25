@@ -1,7 +1,7 @@
 {
   "name": "workforce",
-  "version": "1.4.0",
-  "description": "Control plane for managing autonomous Claude Code agent sessions. Spawns tasks in isolated git worktrees, manages lifecycle, auto-merges, and tracks costs.",
+  "version": "2.0.0",
+  "description": "Control plane for managing autonomous Claude Code agent sessions with self-improving AI context memory. Spawns tasks in isolated git worktrees, injects domain knowledge rules, learns from failures via eval feedback loop, and tracks costs.",
   "author": {
     "name": "Praveen Gujar"
   },
@@ -23,7 +23,8 @@
     "./agents/failure-forensics.md",
     "./agents/release-manager.md",
     "./agents/qa-engineer.md",
-    "./agents/requirements-analyst.md"
+    "./agents/requirements-analyst.md",
+    "./agents/knowledge-curator.md"
   ],
   "mcpServers": "./.mcp.json"
 }
