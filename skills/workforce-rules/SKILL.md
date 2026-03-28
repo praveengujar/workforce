@@ -80,6 +80,7 @@ This means agents become domain experts for the specific files they're working o
 ## Tips
 
 - Start with 5-10 rules for your most common mistakes (anti-patterns, naming conventions, required patterns)
+- Bootstrap baseline reuse policy with `node mcp-server/scripts/seed-reusable-library-rules.js --apply`
 - Use `**` for recursive matching: `src/auth/**` matches all files under src/auth/
 - Higher priority rules are injected first (useful when prompt space is limited)
 - Rules with the same category+name are upserted (updated, not duplicated)

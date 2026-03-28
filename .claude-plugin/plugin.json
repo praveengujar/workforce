@@ -24,7 +24,8 @@
     "./agents/release-manager.md",
     "./agents/qa-engineer.md",
     "./agents/requirements-analyst.md",
-    "./agents/knowledge-curator.md"
+    "./agents/knowledge-curator.md",
+    "./agents/security-auditor.md"
   ],
   "mcpServers": "./.mcp.json"
 }

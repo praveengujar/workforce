@@ -1,9 +1,9 @@
 ---
 name: workforce-rescue
-description: Diagnose and recover failed tasks. Classifies failure root cause, proposes fix, and offers retry with improved prompt. Use when tasks have failed or user wants to investigate failures.
+description: Diagnose and recover failed tasks with retrospective analysis. Classifies failure root cause, analyzes patterns across recent failures, proposes fixes with improved prompts, and surfaces systemic issues. Use when tasks have failed or user wants to investigate failures.
 ---
 
-When the user invokes /workforce-rescue, diagnose failed tasks and guide recovery.
+When the user invokes /workforce-rescue, diagnose failed tasks, analyze failure patterns, and guide recovery.
 
 ## Steps
 
@@ -77,3 +77,64 @@ If multiple tasks failed, after showing all diagnosis cards, offer:
 ```
 
 Process them one at a time unless the user asks for batch retry.
+
+## Retrospective Analysis
+
+After presenting diagnosis cards, run a mini-retro on recent failures to surface systemic issues.
+
+### Steps
+
+1. Call `workforce_health_metrics` to get success/failure/retry rates
+2. Call `workforce_list_evals` to get recent failure evaluations
+3. Call `workforce_cost_summary` to understand cost impact of failures
+4. Analyze patterns across all recent failures (not just current batch)
+
+### Failure Retro Template
+
+```
+━━━ RESCUE RETRO ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Period: Last 7 days
+
+FAILURE PATTERNS
+  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
+  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
+  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
+
+COST IMPACT
+  Failed task spend: ${cost} ({pct}% of total spend)
+  Retry overhead:    ${cost} (from {count} retries)
+  Wasted:            ${cost} (tasks that failed and were not retried)
+
+SYSTEMIC ISSUES
+  {if same root cause appears 3+ times:}
+  ⚠ Recurring: "{root_cause}" — appeared {count} times
+    Suggested fix: {systemic fix — e.g., create knowledge rule, update prompt template}
+
+  {if failure rate > 30%:}
+  ⚠ High failure rate ({pct}%) — consider:
+    - Are prompts specific enough? (run /workforce-rubberduck)
+    - Are knowledge rules up to date? (run /workforce-eval)
+    - Is task complexity correctly estimated? (check tier distribution)
+
+PREVENTIVE ACTIONS
+  {if unprocessed evals:}
+  → {count} unprocessed evals — run /workforce-eval to create preventive rules
+  {if no rules for common failure paths:}
+  → Missing rules for {paths} — run /workforce-rules to add
+  {if high retry rate:}
+  → Retry rate {pct}% — consider /workforce-decompose for complex tasks
+```
+
+### Knowledge Rule Suggestions
+
+When recurring failures point to a pattern:
+1. Draft a knowledge rule that would prevent the failure category
+2. Offer to create it via `workforce_create_rule`:
+   - Path: derived from the failing tasks' file patterns
+   - Category: mapped from failure category (zero_work → `workflow`, merge_failure → `patterns`)
+   - Priority: 7+ for recurring issues
+3. If the user approves, create the rule and note it in the retro summary
+
+### Integration with /workforce-retro
+
+The rescue retro is a focused subset of `/workforce-retro`. When the user wants broader analysis (velocity, code quality, wins), suggest running the full retro.

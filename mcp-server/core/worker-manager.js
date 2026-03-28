@@ -16,6 +16,7 @@ import {
   openSync,
   readSync,
   closeSync,
+  unlinkSync,
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -813,21 +814,32 @@ async function handleTmuxWorkerExit(taskId, output) {
       gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
     } catch { /* may already be committed */ }
 
-    updateTask(taskId, {
-      status: 'review',
-      output: cleanOutput,
-      exitCode: 0,
-    });
-    logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+    if (task.autoMerge) {
+      updateTask(taskId, { output: cleanOutput, exitCode: 0 });
+      await mergeWorktree(task);
+    } else {
+      updateTask(taskId, {
+        status: 'review',
+        output: cleanOutput,
+        exitCode: 0,
+      });
+      logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+    }
   } else {
+    // Distinguish crash from genuine zero-work: if task ran < 2 min, likely a crash
+    const runtimeMs = task.startedAt ? Date.now() - new Date(task.startedAt).getTime() : Infinity;
+    const isCrash = runtimeMs < 2 * 60 * 1000;
+    const errorMsg = isCrash
+      ? `Agent crashed after ${Math.round(runtimeMs / 1000)}s — no files changed (likely transient, will auto-retry)`
+      : 'No files changed — zero-work guard triggered';
     updateTask(taskId, {
       status: 'failed',
       output: cleanOutput,
-      error: 'No files changed — zero-work guard triggered',
+      error: errorMsg,
       exitCode: 0,
       completedAt: new Date().toISOString(),
     });
-    logEvent(taskId, 'failed', 'Zero-work guard');
+    logEvent(taskId, 'failed', isCrash ? 'Crash detected (short runtime, no changes)' : 'Zero-work guard');
     cleanupWorktree(taskId, worktreePath);
   }
 
@@ -846,7 +858,7 @@ async function handleTmuxWorkerExit(taskId, output) {
   removeToken(taskId);
 
   // Clean up prompt file
-  try { const { unlinkSync } = await import('node:fs'); unlinkSync(join(DATA_DIR, `${taskId}.prompt`)); } catch { /* ignore */ }
+  try { unlinkSync(join(DATA_DIR, `${taskId}.prompt`)); } catch { /* ignore */ }
 
   await promotePending();
 }
@@ -905,9 +917,16 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
       logEvent(taskId, 'verification', 'Changes detected — awaiting review');
     }
   } else {
-    const errorMsg = exitCode !== 0
-      ? `Claude exited with code ${exitCode}. ${stderr || ''}`.trim()
-      : 'No files changed — zero-work guard triggered';
+    let errorMsg;
+    if (exitCode !== 0) {
+      errorMsg = `Claude exited with code ${exitCode}. ${stderr || ''}`.trim();
+    } else {
+      const runtimeMs = freshTask?.startedAt ? Date.now() - new Date(freshTask.startedAt).getTime() : Infinity;
+      const isCrash = runtimeMs < 2 * 60 * 1000;
+      errorMsg = isCrash
+        ? `Agent crashed after ${Math.round(runtimeMs / 1000)}s — no files changed (likely transient, will auto-retry)`
+        : 'No files changed — zero-work guard triggered';
+    }
     updateTask(taskId, {
       status: 'failed',
       output,

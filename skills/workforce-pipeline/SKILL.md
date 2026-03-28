@@ -8,7 +8,7 @@ When the user invokes /workforce-pipeline, orchestrate a complete task lifecycle
 ## Pipeline Stages
 
 ```
-pre-scan → rubberduck → launch → [agent codes] → test plan → QA → human review → merge
+pre-scan → rubberduck → launch → [agent codes] → test plan → QA → security (CSO) → adversarial → human review → merge
 ```
 
 Each stage is optional and skippable. The pipeline adapts based on task complexity.
@@ -59,13 +59,35 @@ Decision logic:
 3. Wait for QA task(s) to complete
 4. Report QA results
 
-### Stage 5: Human Review
+### Stage 5: Security Audit (skip for config/docs changes)
+1. Run the CSO audit in task mode against the task diff (same as `/workforce-cso <task_id>`)
+2. In standard mode: only report findings with confidence >= 8/10
+3. Any CRITICAL finding → flag for human review with BLOCK MERGE recommendation
+4. HIGH findings → note in review card for human decision
+5. Results feed into the review scoring (Security category weight)
+
+Decision logic:
+- CRITICAL findings: require explicit human waiver to proceed
+- HIGH findings: proceed with warning, human decides
+- MEDIUM/LOW only: proceed automatically
+- No findings: proceed with clean security note
+
+### Stage 6: Adversarial Review (skip for small diffs <50 lines)
+1. Run cross-model adversarial review (same as `/workforce-adversarial <task_id>`)
+2. Auto-scale depth by diff size (small=skip, medium=dual, large=triple voice)
+3. Reconcile findings between models
+4. Consensus findings feed into review scoring (Correctness + Security categories)
+5. Low agreement rate (<40%) → flag for human attention
+
+### Stage 7: Human Review
 1. Show the diff via `workforce_get_diff`
 2. Show QA results (if QA was run)
-3. Show the test plan checklist (if generated)
-4. Ask for human decision: approve or reject (with reason)
+3. Show security audit summary (if CSO was run) with finding count and severity breakdown
+4. Show adversarial review summary (if run) with agreement rate and consensus findings
+5. Show the test plan checklist (if generated)
+6. Ask for human decision: approve or reject (with reason)
 
-### Stage 6: Merge (on approve)
+### Stage 8: Merge (on approve)
 1. Call `workforce_approve_task` with the approval reason
 2. Report merge result (success, conflict, or failure)
 3. If merge fails, offer to create a fix-up task
@@ -81,7 +103,9 @@ Prompt: "{prompt_40}..."
   ● Code          Agent working... {elapsed}
   ○ Test Plan     Waiting for code completion
   ○ QA            Waiting for test plan
-  ○ Review        Waiting for QA
+  ○ Security      Waiting for QA (CSO audit)
+  ○ Adversarial   Waiting for security (cross-model review)
+  ○ Review        Waiting for adversarial
   ○ Merge         Waiting for approval
 ```
 
@@ -91,8 +115,9 @@ Update this status card as each stage completes.
 
 - **Simple tasks (○ tier, <$0.10)**: Pre-scan → Launch → Review → Merge.
 - **Medium tasks (● tier, $0.10-$0.50)**: Pre-scan → Launch → Test Plan → QA → Review → Merge.
-- **Complex tasks (◉ tier, >$0.50)**: Pre-scan → Rubberduck → Launch → Test Plan → QA → Review → Merge.
-- **User override**: "skip QA", "skip rubberduck" — honor immediately.
+- **Complex tasks (◉ tier, >$0.50)**: Pre-scan → Rubberduck → Launch → Test Plan → QA → Security → Adversarial → Review → Merge.
+- **Security-sensitive**: Any task touching auth/payments/secrets: always include Security stage regardless of tier.
+- **User override**: "skip QA", "skip security", "skip adversarial", "skip rubberduck" — honor immediately.
 
 ## Error Handling
 

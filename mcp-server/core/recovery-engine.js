@@ -4,7 +4,7 @@ import { logEvent } from './task-events.js';
 import { createEval } from './eval-engine.js';
 
 const SCAN_INTERVAL_MS = 30_000;
-const ZOMBIE_THRESHOLD_MS = 60 * 60 * 1000;
+const ZOMBIE_THRESHOLD_MS = 3 * 60 * 1000;
 const RETRY_BACKOFF_MS = 60_000;
 const MAX_RETRIES_DEFAULT = 3;
 

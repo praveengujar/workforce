@@ -68,6 +68,7 @@ Once installed, use these slash commands inside Claude Code:
 /workforce-decompose "big task"     # Break complex work into subtasks
 /workforce-rescue                   # Diagnose and recover failed tasks
 /workforce-pipeline "task"          # Full pipeline: pre-scan → rubberduck → code → QA → review → merge
+/workforce-autoplan "task"          # Strict gated orchestrator: pre-scan → plan → code → QA → review → human gate → merge
 /workforce-chain                    # Create sequential task chains
 /workforce-experiment               # Run iterative optimization experiments
 ```
@@ -132,6 +133,14 @@ Encode team standards, architectural patterns, and institutional knowledge as pa
 
 ```
 /workforce-rules                    # Create, list, query by path, delete
+```
+
+Seed baseline reusable-library rules:
+
+```bash
+cd /path/to/workforce/mcp-server
+node scripts/seed-reusable-library-rules.js --dry-run
+node scripts/seed-reusable-library-rules.js --apply
 ```
 
 Rules match in two ways:
@@ -260,10 +269,12 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   ├── cost-approval.js       # Cost policy evaluation
 │   │   ├── formatters.js          # Dashboard formatting with Unicode
 │   │   └── sparkline.js           # Progress bar rendering
-│   └── config/
-│       ├── defaults.json          # Tunable constants (timeouts, limits)
-│       └── metrics-targets.json   # Health metric targets and warning thresholds
-├── skills/                        # 22 slash commands
+│   ├── config/
+│   │   ├── defaults.json          # Tunable constants (timeouts, limits)
+│   │   └── metrics-targets.json   # Health metric targets and warning thresholds
+│   └── scripts/
+│       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
+├── skills/                        # 29 slash commands
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-launch/          # Task creation flow
 │   ├── workforce-review/          # Diff review + weighted scoring
@@ -285,6 +296,13 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   ├── workforce-test-plan/       # Test plan generation
 │   ├── workforce-gate-status/     # Quality gate status
 │   ├── workforce-cleanup/         # Bulk cleanup
+│   ├── workforce-careful/         # Safety guardrails for destructive commands
+│   ├── workforce-cso/             # 14-phase security audit
+│   ├── workforce-adversarial/     # Cross-model adversarial review
+│   ├── workforce-retro/           # Engineering retrospective analytics
+│   ├── workforce-design/          # Design system consultation
+│   ├── workforce-design-shotgun/  # Rapid multi-direction design exploration
+│   ├── workforce-autoplan/        # Strict gate-driven end-to-end orchestrator
 │   └── workforce-version/         # Version info
 ├── agents/                        # 8 agent definitions
 │   ├── task-planner.md            # Decomposes complex prompts into subtasks
@@ -296,8 +314,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   ├── requirements-analyst.md    # Deep-dive requirements + trust hierarchy + risk classification
 │   └── knowledge-curator.md       # Eval → rule pipeline automation
 ├── scripts/
-│   ├── bump-version.js            # Version update utility
-│   └── seed-vystral-rules.js      # Example: seed 29 VystralAI knowledge rules
+│   └── bump-version.js            # Version update utility
 └── hooks/
     ├── hooks.json                 # SessionStart + SessionEnd hook config
     ├── startup.js                 # Prune worktrees, abort stale merges, log session context

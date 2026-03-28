@@ -11,7 +11,7 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 ## Stack
 
 - **MCP server** (stdio) — 48 tools for task lifecycle, backlog, monitoring, context management
-- **Skills** — `/workforce`, `/workforce-launch`, `/workforce-review`, `/workforce-backlog`, `/workforce-health`, `/workforce-decompose`, `/workforce-chain`, `/workforce-experiment`, `/workforce-rescue`, `/workforce-sprint`, `/workforce-release`, `/workforce-merge`, `/workforce-qa`, `/workforce-rubberduck`, `/workforce-test-plan`, `/workforce-pipeline`, `/workforce-gate-status`, `/workforce-cleanup`, `/workforce-version`, `/workforce-rules`, `/workforce-eval`, `/workforce-context`
+- **Skills** — `/workforce`, `/workforce-launch`, `/workforce-review`, `/workforce-backlog`, `/workforce-health`, `/workforce-decompose`, `/workforce-chain`, `/workforce-experiment`, `/workforce-rescue`, `/workforce-sprint`, `/workforce-release`, `/workforce-merge`, `/workforce-qa`, `/workforce-rubberduck`, `/workforce-test-plan`, `/workforce-pipeline`, `/workforce-gate-status`, `/workforce-cleanup`, `/workforce-version`, `/workforce-rules`, `/workforce-eval`, `/workforce-context`, `/workforce-careful`, `/workforce-cso`, `/workforce-adversarial`, `/workforce-retro`, `/workforce-design`, `/workforce-design-shotgun`, `/workforce-autoplan`
 - **Agents** — task-planner, backlog-analyst, experiment-researcher, failure-forensics, release-manager, qa-engineer, requirements-analyst, knowledge-curator
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
 - **Dependency** — `@modelcontextprotocol/sdk`
@@ -24,9 +24,10 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
   - `core/` — DB, worker manager, recovery engine, cost model, tmux, profiles, knowledge rules, eval engine, session context, dependency graph cache
   - `tools/` — Task, lifecycle, backlog, monitoring, knowledge, eval, session, graph tool handlers
   - `config/` — Defaults, metrics targets
-- `skills/` — 22 SKILL.md files (slash commands)
+- `skills/` — 29 SKILL.md files (slash commands)
 - `agents/` — 8 agent definitions
 - `scripts/` — Version bump utility
+- `mcp-server/scripts/` — Rule seeding and maintenance helpers
 - `hooks/` — SessionStart cleanup + SessionEnd eval analysis
 
 ## Task lifecycle
@@ -118,6 +119,66 @@ Weighted multi-category scoring: Correctness (3x), Security (3x), Test coverage 
 6. Upstream task results + shared context (dependency injection)
 7. Knowledge rules (path-matched or keyword-matched, priority-sorted, 3000 char cap) — Trust: MEDIUM
 8. Session context (active_focus first, recency-ordered, whole-entry eviction, 1500 char cap) — Trust: LOW
+
+## Safety guardrails (v2.1.0)
+
+`/workforce-careful` activates destructive command interception for both user sessions and spawned agents:
+- PreToolUse hook (`hooks/check-careful.sh`) intercepts: rm -rf, DROP TABLE, git push --force, git reset --hard, kubectl delete, docker rm -f
+- Safe exceptions: node_modules, dist, build, coverage, .cache (build artifacts)
+- Session context `careful_mode: active` injects safety preamble into all spawned task prompts
+- Workflow safety tool, not a security boundary — prevents accidental damage
+
+## Security auditing (v2.1.0)
+
+`/workforce-cso` runs a 14-phase security audit (adapted from gstack):
+1. Stack detection → Attack surface → Secrets archaeology → Supply chain → CI/CD → Infrastructure → Webhooks → LLM/AI → Skills → OWASP Top 10 → STRIDE → Data classification → False-positive filtering → Report
+2. Confidence gating: standard (8/10) or comprehensive (2/10)
+3. Task mode audits only the task diff; full mode audits entire codebase
+4. Integrates with pipeline: CRITICAL findings block merge, HIGH findings warn
+5. `security-auditor` agent profile for autonomous deep audits
+
+## Cross-model adversarial review (v2.1.0)
+
+`/workforce-adversarial` runs independent parallel reviews (Claude + OpenAI Codex):
+- Auto-scales by diff size: small (single), medium (dual), large (triple voice)
+- Reconciles findings: consensus, Claude-only, Codex-only, agreement rate, tension points
+- Falls back to dual-Claude mode if Codex CLI unavailable
+- Integrates with pipeline between QA and human review stages
+
+## Engineering retrospective (v2.1.0)
+
+`/workforce-retro` analyzes agent task performance and shipping velocity:
+- Task metrics (success rate, duration, cost efficiency) + git metrics (commits, LOC, test ratio)
+- Failure pattern analysis from eval logs
+- Compare mode for period-over-period trends
+- Anchored praise and improvement suggestions (specific to tasks/commits, never generic)
+- `/workforce-rescue` now includes a mini-retro on failure patterns with systemic issue detection
+
+## Design system (v2.1.0)
+
+`/workforce-design` generates complete design systems (typography, color, spacing, layout, motion):
+- Writes DESIGN.md as source of truth with full token definitions
+- Anti-slop enforcement: blacklists AI-generated patterns (purple gradients, 3-column icon grids, centered everything)
+- Creates knowledge rules for UI files to enforce design tokens in agent tasks
+
+`/workforce-design-shotgun` generates 3-8 design variants for comparison:
+- Parallel variant generation via independent Agent subagents
+- Taste memory from prior approved designs biases future generation
+- Structured feedback loop with iteration support
+- Anti-slop checked on every variant before presentation
+
+## Multi-perspective planning (v2.1.0)
+
+`/workforce-autoplan` is a strict gate-driven orchestrator for end-to-end delivery:
+- Stages: pre-scan → rubberduck → test plan → code loop → QA → review → human decision → merge
+- Never skips human decision gate, never auto-merges
+- Every gate produces evidence artifacts in the status card
+
+`/workforce-rubberduck` enhanced with multi-perspective analysis:
+- Strategy (CEO): premise challenge, scope management, alternatives
+- Design (UX): interaction states, responsive, AI slop risk (skipped for backend tasks)
+- Engineering: always runs — scope, ambiguity, risk, acceptance criteria
+- Quick mode: `/workforce-rubberduck quick` for engineering-only rapid refinement
 
 ## Rules
 
