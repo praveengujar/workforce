@@ -40,7 +40,8 @@ import {
 
 import {
   healthMetricsHandler, costSummaryHandler,
-  runRecoveryHandler,
+  runRecoveryHandler, opsMetricsHandler, routeTaskHandler,
+  evalClustersHandler, ruleLintHandler,
 } from './tools/monitoring-tools.js';
 
 import {
@@ -88,7 +89,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '2.0.0';
+const WORKFORCE_VERSION = '2.2.0';
 
 const server = new McpServer({
   name: 'workforce',
@@ -245,8 +246,15 @@ server.tool(
 
 server.tool(
   'workforce_approve_task',
-  'Approve a task in review status — merges its branch to the target branch.',
-  { task_id: z.string().describe('Task ID to approve'), reason: z.string().optional().describe('Approval rationale') },
+  'Approve a task in review status — merges its branch to the target branch. Enforces gate evidence (human_decision required; qa/security/adversarial required if started). Provide waivers to bypass specific gates with auditable reason.',
+  {
+    task_id: z.string().describe('Task ID to approve'),
+    reason: z.string().optional().describe('Approval rationale'),
+    waivers: z.array(z.object({
+      gate: z.string().describe('Gate to waive (e.g., qa, security, adversarial, human_decision)'),
+      reason: z.string().describe('Why this gate is being waived'),
+    })).optional().describe('Explicit waivers for missing gate evidence'),
+  },
   wrap(approveTaskHandler),
 );
 
@@ -408,6 +416,47 @@ server.tool(
     const summary = getCostLogSummary(start_date, end_date);
     return { entries, summary };
   }),
+);
+
+// ---------------------------------------------------------------------------
+// Ops Dashboard + Capability Router Tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_ops_metrics',
+  'Get operational metrics: gate pass/fail rates, merge-block reasons, post-merge verification results, eval clusters, and rule quality issues.',
+  {},
+  wrap(opsMetricsHandler),
+);
+
+server.tool(
+  'workforce_route_task',
+  'Recommend the optimal skill path for a task prompt based on intent, complexity, and risk. Returns recommended skill, reason, alternatives, and detected flags.',
+  {
+    prompt: z.string().describe('Task prompt to analyze'),
+    tier: z.string().optional().describe('Estimated tier: simple, medium, or complex'),
+    file_paths: z.array(z.string()).optional().describe('Detected file paths in the prompt'),
+  },
+  wrap(routeTaskHandler),
+);
+
+server.tool(
+  'workforce_eval_clusters',
+  'Detect clusters of similar unprocessed evals and suggest preventive rules. Returns clusters of 3+ similar failures with suggested rule content and confidence score.',
+  {
+    min_cluster_size: z.number().optional().describe('Minimum evals to form a cluster (default 3)'),
+    similarity_threshold: z.number().optional().describe('Jaccard similarity threshold 0-1 (default 0.7)'),
+  },
+  wrap(({ min_cluster_size, similarity_threshold }) => {
+    return evalClustersHandler({ min_cluster_size, similarity_threshold });
+  }),
+);
+
+server.tool(
+  'workforce_rule_lint',
+  'Run quality checks on all knowledge rules. Detects global wildcards, near-duplicates, short content, and priority issues.',
+  {},
+  wrap(ruleLintHandler),
 );
 
 // ---------------------------------------------------------------------------

@@ -61,3 +61,21 @@ After the template, add a **DIAGNOSIS** section (2-4 sentences) with your own an
 - What's driving failures? (Look at recent failed tasks' error messages)
 - Are costs trending up?
 - Specific recommendations to improve one-shot rate
+
+## Extended Ops Metrics
+
+Call `workforce_ops_metrics` for governance and quality data. Append after DIAGNOSIS:
+
+```
+─── GOVERNANCE ────────────────────────────────────────
+Gate pass rate:  {pct}%  ({passed}/{total})
+Gate waivers:    {count}
+Merge blocks:    {count}  Top: {reason}
+Post-merge:      {passed} passed, {failed} failed
+
+─── EVAL CLUSTERS ─────────────────────────────────────
+{category}: {count} similar failures → suggested rule: "{name}"
+
+─── RULE QUALITY ──────────────────────────────────────
+{count} issues:  {top issue summaries}
+```

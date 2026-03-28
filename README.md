@@ -1,4 +1,4 @@
-# Workforce v2.0.0
+# Workforce v2.2.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 
@@ -14,6 +14,12 @@ Workforce lets you run multiple Claude Code agents in parallel, each working on 
 - **Auto-recovery**: Recovery engine detects stuck tasks, ghost processes, and merge failures — fixes them and logs evals
 - **Cost tracking**: Self-calibrating cost model estimates and tracks spend per task
 - **Backlog management**: Maintain a prioritized queue of work items, launch them as agent tasks
+- **Safety guardrails**: Intercept destructive commands (rm -rf, DROP TABLE, force push) in user and agent sessions
+- **Security auditing**: 14-phase CSO audit (OWASP, STRIDE, secrets, supply chain, LLM threats) with confidence gating
+- **Adversarial review**: Cross-model review (Claude + OpenAI Codex) with finding reconciliation and agreement analysis
+- **Design system**: Generate complete design systems with anti-AI-slop enforcement and multi-variant exploration
+- **Engineering retros**: Task performance analytics, failure pattern analysis, velocity metrics, and cost efficiency trends
+- **Multi-perspective planning**: CEO strategy, design UX, and engineering architecture reviews before launching complex tasks
 
 ## Install
 
@@ -71,6 +77,12 @@ Once installed, use these slash commands inside Claude Code:
 /workforce-autoplan "task"          # Strict gated orchestrator: pre-scan → plan → code → QA → review → human gate → merge
 /workforce-chain                    # Create sequential task chains
 /workforce-experiment               # Run iterative optimization experiments
+/workforce-careful                  # Activate safety guardrails for destructive commands
+/workforce-cso                      # Run 14-phase security audit
+/workforce-adversarial              # Cross-model adversarial review (Claude + Codex)
+/workforce-retro                    # Engineering retrospective with velocity metrics
+/workforce-design                   # Design system consultation → DESIGN.md
+/workforce-design-shotgun           # Multi-variant design exploration (3-8 options)
 ```
 
 ## How it works
@@ -84,7 +96,7 @@ pending → running → review → merging → done
                       ↓
                    failed ← timeout / zero-work / crash
                       ↓
-                   retry (up to 3x)
+                   retry (up to 2x)
 ```
 
 1. **Create**: You describe a task. Workforce creates a git worktree on a new branch (`wf/{task-id}`). Project defaults to cwd basename if not specified.
@@ -228,7 +240,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v2.0.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v2.2.0)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
@@ -274,7 +286,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 29 slash commands
+├── skills/                        # 29 slash commands (7 new in v2.2.0)
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-launch/          # Task creation flow
 │   ├── workforce-review/          # Diff review + weighted scoring
@@ -304,7 +316,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   ├── workforce-design-shotgun/  # Rapid multi-direction design exploration
 │   ├── workforce-autoplan/        # Strict gate-driven end-to-end orchestrator
 │   └── workforce-version/         # Version info
-├── agents/                        # 8 agent definitions
+├── agents/                        # 9 agent definitions
 │   ├── task-planner.md            # Decomposes complex prompts into subtasks
 │   ├── backlog-analyst.md         # Prioritizes and stack-ranks backlog items
 │   ├── experiment-researcher.md   # Iterative code experiments
@@ -312,13 +324,15 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   ├── release-manager.md         # Release preparation
 │   ├── qa-engineer.md             # E2E test writing with Playwright
 │   ├── requirements-analyst.md    # Deep-dive requirements + trust hierarchy + risk classification
-│   └── knowledge-curator.md       # Eval → rule pipeline automation
+│   ├── knowledge-curator.md       # Eval → rule pipeline automation
+│   └── security-auditor.md        # 14-phase CSO security audit agent
 ├── scripts/
 │   └── bump-version.js            # Version update utility
 └── hooks/
     ├── hooks.json                 # SessionStart + SessionEnd hook config
     ├── startup.js                 # Prune worktrees, abort stale merges, log session context
-    └── session-end.js             # Analyze recent failures, create eval entries
+    ├── session-end.js             # Analyze recent failures, create eval entries
+    └── check-careful.sh           # PreToolUse hook — intercepts destructive commands
 ```
 
 ## MCP tools reference (48 tools)

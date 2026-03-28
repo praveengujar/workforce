@@ -30,6 +30,21 @@ const VALID_DETECTIONS = [
 
 const VALID_ACTIONS = ['rule_created', 'rule_updated', 'memory_updated', 'dismissed'];
 
+// Category-to-path fallback when preventiveUpdate lacks scoped paths.
+// Avoids generating global ['**/*'] rules that pollute agent context.
+const CATEGORY_PATH_FALLBACKS = {
+  pattern_violation: ['src/**'],
+  infrastructure: ['mcp-server/**', 'hooks/**'],
+  prompt_quality: ['skills/**'],
+  scope_creep: ['src/**'],
+  rate_limit: ['mcp-server/**'],
+  environment: ['mcp-server/**', 'hooks/**'],
+  zero_work: ['src/**', 'lib/**'],
+  merge_failure: ['src/**'],
+  dependency_failure: ['src/**'],
+  custom: ['src/**'],
+};
+
 // ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
@@ -141,35 +156,42 @@ export function processEval(id, action) {
       throw new Error(`Cannot create rule from eval "${id}": no correctApproach, whatHappened, or preventiveUpdate`);
     }
 
+    // Derive scoped fallback paths from eval category — never use ['**/*']
+    const fallbackPaths = CATEGORY_PATH_FALLBACKS[evalEntry.category] || ['src/**'];
+
     if (evalEntry.preventiveUpdate) {
       try {
         const update = JSON.parse(evalEntry.preventiveUpdate);
+        // Reject global wildcard paths — use category-derived fallback instead
+        const paths = (update.paths && !update.paths.includes('**/*'))
+          ? update.paths
+          : fallbackPaths;
         createRule({
           category: update.category || 'patterns',
           name: update.name || `eval-${id}-fix`,
           description: update.description || `Auto-generated from eval ${id}`,
-          paths: update.paths || ['**/*'],
+          paths,
           content: update.content || ruleContent,
           priority: update.priority || 5,
         });
       } catch {
-        // preventiveUpdate isn't valid JSON — fall through to generic rule
+        // preventiveUpdate isn't valid JSON — use category-derived paths
         createRule({
           category: 'patterns',
           name: `eval-${id}-fix`,
           description: `Auto-generated from eval ${id}: ${evalEntry.category}`,
-          paths: ['**/*'],
+          paths: fallbackPaths,
           content: ruleContent,
           priority: 4,
         });
       }
     } else {
-      // No preventiveUpdate — create generic rule from correctApproach/whatHappened
+      // No preventiveUpdate — create rule with category-derived paths
       createRule({
         category: 'patterns',
         name: `eval-${id}-fix`,
         description: `Auto-generated from eval ${id}: ${evalEntry.category}`,
-        paths: ['**/*'],
+        paths: fallbackPaths,
         content: ruleContent,
         priority: 4,
       });
@@ -195,6 +217,111 @@ export function processEval(id, action) {
   ).run(now, action, id);
 
   return getEvalById(id);
+}
+
+// ---------------------------------------------------------------------------
+// Eval clustering — group similar failures and suggest rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple word-trigram similarity (Jaccard).
+ */
+function textSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const trigrams = (s) => {
+    const words = s.toLowerCase().split(/\s+/);
+    const t = new Set();
+    for (let i = 0; i <= words.length - 3; i++) t.add(words.slice(i, i + 3).join(' '));
+    return t;
+  };
+  const tA = trigrams(a);
+  const tB = trigrams(b);
+  if (tA.size === 0 && tB.size === 0) return 1;
+  let intersection = 0;
+  for (const t of tA) if (tB.has(t)) intersection++;
+  const union = tA.size + tB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Cluster unprocessed evals by category + error similarity (>70%).
+ * Returns array of clusters, each with evals and a suggested rule.
+ *
+ * @param {Object} options
+ * @param {number} [options.minClusterSize=3] - Minimum evals to form a cluster
+ * @param {number} [options.similarityThreshold=0.7] - Jaccard threshold for clustering
+ * @returns {Array<{ category: string, evals: Array, suggestedRule: Object, confidence: number }>}
+ */
+export function clusterEvals({ minClusterSize = 3, similarityThreshold = 0.7 } = {}) {
+  const unprocessed = listEvals({ unprocessedOnly: true });
+  if (unprocessed.length < minClusterSize) return [];
+
+  // Group by category first
+  const byCategory = new Map();
+  for (const ev of unprocessed) {
+    if (!byCategory.has(ev.category)) byCategory.set(ev.category, []);
+    byCategory.get(ev.category).push(ev);
+  }
+
+  const clusters = [];
+
+  for (const [category, evals] of byCategory) {
+    if (evals.length < minClusterSize) continue;
+
+    // Greedy clustering within category
+    const used = new Set();
+    for (let i = 0; i < evals.length; i++) {
+      if (used.has(i)) continue;
+      const cluster = [evals[i]];
+      used.add(i);
+
+      for (let j = i + 1; j < evals.length; j++) {
+        if (used.has(j)) continue;
+        const sim = textSimilarity(evals[i].whatHappened, evals[j].whatHappened);
+        if (sim >= similarityThreshold) {
+          cluster.push(evals[j]);
+          used.add(j);
+        }
+      }
+
+      if (cluster.length >= minClusterSize) {
+        // Derive a suggested rule from the cluster
+        const correctApproaches = cluster.map(e => e.correctApproach).filter(Boolean);
+        const commonCorrection = correctApproaches[0] || cluster[0].whatHappened;
+
+        // Extract paths from all eval task prompts
+        const allPaths = new Set();
+        for (const ev of cluster) {
+          if (ev.preventiveUpdate) {
+            try {
+              const update = JSON.parse(ev.preventiveUpdate);
+              if (update.paths) update.paths.forEach(p => allPaths.add(p));
+            } catch { /* ignore */ }
+          }
+        }
+        const rulePaths = allPaths.size > 0
+          ? [...allPaths].filter(p => p !== '**/*')
+          : CATEGORY_PATH_FALLBACKS[category] || ['src/**'];
+
+        clusters.push({
+          category,
+          evalCount: cluster.length,
+          evals: cluster.map(e => ({ id: e.id, taskId: e.taskId, whatHappened: e.whatHappened?.slice(0, 100) })),
+          confidence: Math.min(cluster.length / 5, 1), // 5+ evals = 100% confidence
+          suggestedRule: {
+            category: category === 'zero_work' ? 'workflow' : category === 'merge_failure' ? 'patterns' : 'patterns',
+            name: `cluster-${category}-${Date.now().toString(36).slice(-4)}`,
+            description: `Auto-suggested from ${cluster.length} similar ${category} failures`,
+            paths: rulePaths.length > 0 ? rulePaths : ['src/**'],
+            content: commonCorrection,
+            priority: cluster.length >= 5 ? 7 : 5,
+          },
+        });
+      }
+    }
+  }
+
+  return clusters;
 }
 
 export { VALID_CATEGORIES as EVAL_CATEGORIES, VALID_SEVERITIES, VALID_DETECTIONS, VALID_ACTIONS };

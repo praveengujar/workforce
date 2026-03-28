@@ -90,6 +90,29 @@ function extractSessionId(stderr) {
  * Check whether any files changed in a worktree relative to a base commit.
  * Shared by both tmux and child_process exit handlers.
  */
+/**
+ * Detect a test command from project config.
+ * Returns { cmd, args } or null if no test command found.
+ */
+function detectTestCommand(repoRoot) {
+  try {
+    const pkgPath = join(repoRoot, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+        return { cmd: 'npm', args: ['test', '--', '--bail'] };
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    if (existsSync(join(repoRoot, 'Makefile'))) {
+      const mk = readFileSync(join(repoRoot, 'Makefile'), 'utf8');
+      if (mk.includes('test:')) return { cmd: 'make', args: ['test'] };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 function checkFilesChanged(worktreePath, baseCommit) {
   if (!worktreePath) return false;
   try {
@@ -786,7 +809,10 @@ async function handleTmuxWorkerExit(taskId, output) {
   logEvent(taskId, 'claude_exited', 'tmux session ended');
 
   const task = getTask(taskId);
-  if (!task) return;
+  if (!task) {
+    HANDLED_EXITS.delete(taskId);
+    return;
+  }
 
   const worktreePath = task.worktreePath;
   const cleanOutput = (output || '').slice(-4000);
@@ -1008,6 +1034,27 @@ async function mergeWorktree(task) {
 
     // 5. Log merge
     logEvent(taskId, 'merge_completed');
+
+    // 6. Post-merge verification — run project test command if available
+    try {
+      const testCmd = detectTestCommand(repoRoot);
+      if (testCmd) {
+        logEvent(taskId, 'post_merge_verify_started', `Running: ${testCmd.cmd} ${testCmd.args.join(' ')}`);
+        try {
+          execFileSync(testCmd.cmd, testCmd.args, {
+            cwd: repoRoot, timeout: 120_000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          logEvent(taskId, 'post_merge_verify_passed', 'Tests passed after merge');
+        } catch (testErr) {
+          const stderr = testErr.stderr?.toString().slice(-500) || testErr.message;
+          logEvent(taskId, 'post_merge_verify_failed', `Tests failed: ${stderr}`);
+          // Don't fail the task — surface the signal, let human decide on rollback
+          updateTask(taskId, {
+            error: `Post-merge tests failed (merge succeeded). Consider: git revert HEAD. Error: ${stderr.slice(0, 200)}`,
+          });
+        }
+      }
+    } catch { /* ignore test detection errors */ }
   } catch (mergeErr) {
     // 3. Check if conflict is only status.md
     const errMsg = mergeErr.stderr?.toString() || mergeErr.message || '';

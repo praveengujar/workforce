@@ -1,140 +1,92 @@
 ---
 name: workforce-rescue
-description: Diagnose and recover failed tasks with retrospective analysis. Classifies failure root cause, analyzes patterns across recent failures, proposes fixes with improved prompts, and surfaces systemic issues. Use when tasks have failed or user wants to investigate failures.
+description: Diagnose and recover failed tasks. Classifies root cause, proposes fix with improved prompt. Includes failure pattern analysis. For systemic trends, use /workforce-retro.
 ---
 
-When the user invokes /workforce-rescue, diagnose failed tasks, analyze failure patterns, and guide recovery.
+When the user invokes /workforce-rescue, diagnose failed tasks and guide recovery.
 
 ## Steps
 
-1. Call `workforce_list_tasks` with `status_filter: "failed"` to get failed tasks.
-2. If no failed tasks, report all clear and show last 3 completed tasks as context.
+1. Call `workforce_list_tasks` with `status_filter: "failed"` to get failed tasks
+2. If none: report all clear, show last 3 completed tasks as context
 3. For each failed task (most recent first, max 5):
-   a. Call `workforce_task_events` to get the lifecycle timeline
-   b. Call `workforce_task_output` to get the last output/error
-   c. Classify the failure root cause (see categories below)
-   d. Present the diagnosis card
-   e. Propose a recovery action
-4. On user approval: execute the recovery action (retry, archive, or skip)
+   a. Call `workforce_task_events` for lifecycle timeline
+   b. Call `workforce_task_output` for last output/error
+   c. Classify root cause (see categories)
+   d. Present diagnosis card
+   e. Propose recovery action
+4. On approval: execute recovery (retry, archive, or skip)
+5. After all cards: run failure pattern analysis
 
 ## Failure Categories
 
-Classify each failure into exactly one category:
-
 | Category | Pattern | Recovery |
 |----------|---------|----------|
-| **Timeout** | "timed out", "killed after" | Retry with narrower scope or decompose |
-| **Zero-work** | "No files changed", "zero-work guard" | Rewrite prompt to be more specific |
-| **Merge conflict** | "merge failed", "CONFLICT" | Retry after resolving conflict on target branch |
-| **Rate limit** | "rate limit", "529", "overloaded" | Wait and retry (auto-handled by recovery engine) |
+| **Timeout** | "timed out", "killed after" | Retry narrower scope or decompose |
+| **Zero-work** | "No files changed" | Rewrite prompt with specific files/functions |
+| **Merge conflict** | "merge failed", "CONFLICT" | Retry after resolving on target branch |
+| **Rate limit** | "rate limit", "529" | Wait and retry (auto-handled by recovery engine) |
 | **Binary missing** | "ENOENT", "not found" | Check Claude CLI installation |
-| **Budget exceeded** | "Budget exceeded" | Increase budget or reduce task scope |
-| **Dependency failed** | "Dependency failed" | Fix upstream task first, then retry |
-| **Agent error** | Exit code != 0, other errors | Analyze output for root cause, rewrite prompt |
+| **Budget exceeded** | "Budget exceeded" | Increase budget or reduce scope |
+| **Dependency failed** | "Dependency failed" | Fix upstream task first |
+| **Agent error** | Exit code != 0 | Analyze output, rewrite prompt |
 
-## Template — Diagnosis Card
+## Diagnosis Card
 
 ```
-━━━ RESCUE: {id_8} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ RESCUE: {id_8} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Prompt:    {full prompt}
 Failed:    {completedAt}   Duration: {elapsed}
-Category:  {failure_category}
-Error:     {error_message_truncated_to_200}
+Category:  {category}
+Error:     {error_200}
 
 TIMELINE
 {timestamp}  {phase}  {detail}
-{timestamp}  {phase}  {detail}
-...
 
 DIAGNOSIS
-{2-3 sentence root cause analysis}
+{2-3 sentence root cause}
 
 RECOVERY
-  {action_icon} Recommended: {action_description}
-  Improved prompt: "{rewritten_prompt}" (if applicable)
+  Recommended: {action}
+  Improved prompt: "{rewritten}" (if applicable)
 
 ➤ Retry with fix, Archive, or Skip?
 ```
 
-## Prompt Rewriting Rules
+## Prompt Rewriting
 
-When proposing a retry with an improved prompt:
-- If zero-work: add specific file paths, function names, and expected behavior
-- If timeout: reduce scope — split into smaller pieces
-- If agent error: add constraints based on what went wrong (e.g., "do not modify X")
-- If merge conflict: add instruction to check for recent changes on target branch first
-- Preserve the original intent — do not change what the task is trying to accomplish
+- Zero-work: add file paths, function names, expected behavior
+- Timeout: reduce scope — split into pieces
+- Agent error: add constraints based on what went wrong
+- Merge conflict: add instruction to check target branch first
+- Always preserve original intent
+
+## Failure Pattern Analysis
+
+After diagnosis cards, run a quick pattern check:
+
+1. Call `workforce_health_metrics` and `workforce_list_evals`
+2. Group failures by category, identify recurring root causes
+3. If same root cause appears 3+ times: flag as systemic, suggest knowledge rule
+4. If unprocessed evals exist: suggest `/workforce-eval`
+
+```
+━━━ FAILURE PATTERNS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  {category}: {count} ({pct}%) {trend}
+  {if recurring:} ⚠ Recurring: suggest /workforce-rules to prevent
+  {if unprocessed:} → {n} evals pending — run /workforce-eval
+```
 
 ## Batch Mode
 
-If multiple tasks failed, after showing all diagnosis cards, offer:
+If multiple failures, after all cards:
 ```
-━━━ RESCUE SUMMARY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{count} failed tasks analyzed:
-  {count} retryable    {count} needs-rewrite    {count} blocked
-
+{count} failed: {retryable} retryable, {rewrite} needs-rewrite, {blocked} blocked
 ➤ Retry all retryable, or handle individually?
 ```
 
-Process them one at a time unless the user asks for batch retry.
+## Related
 
-## Retrospective Analysis
-
-After presenting diagnosis cards, run a mini-retro on recent failures to surface systemic issues.
-
-### Steps
-
-1. Call `workforce_health_metrics` to get success/failure/retry rates
-2. Call `workforce_list_evals` to get recent failure evaluations
-3. Call `workforce_cost_summary` to understand cost impact of failures
-4. Analyze patterns across all recent failures (not just current batch)
-
-### Failure Retro Template
-
-```
-━━━ RESCUE RETRO ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Period: Last 7 days
-
-FAILURE PATTERNS
-  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
-  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
-  {category}: {count} failures ({pct}% of total) {trend ↑↓→}
-
-COST IMPACT
-  Failed task spend: ${cost} ({pct}% of total spend)
-  Retry overhead:    ${cost} (from {count} retries)
-  Wasted:            ${cost} (tasks that failed and were not retried)
-
-SYSTEMIC ISSUES
-  {if same root cause appears 3+ times:}
-  ⚠ Recurring: "{root_cause}" — appeared {count} times
-    Suggested fix: {systemic fix — e.g., create knowledge rule, update prompt template}
-
-  {if failure rate > 30%:}
-  ⚠ High failure rate ({pct}%) — consider:
-    - Are prompts specific enough? (run /workforce-rubberduck)
-    - Are knowledge rules up to date? (run /workforce-eval)
-    - Is task complexity correctly estimated? (check tier distribution)
-
-PREVENTIVE ACTIONS
-  {if unprocessed evals:}
-  → {count} unprocessed evals — run /workforce-eval to create preventive rules
-  {if no rules for common failure paths:}
-  → Missing rules for {paths} — run /workforce-rules to add
-  {if high retry rate:}
-  → Retry rate {pct}% — consider /workforce-decompose for complex tasks
-```
-
-### Knowledge Rule Suggestions
-
-When recurring failures point to a pattern:
-1. Draft a knowledge rule that would prevent the failure category
-2. Offer to create it via `workforce_create_rule`:
-   - Path: derived from the failing tasks' file patterns
-   - Category: mapped from failure category (zero_work → `workflow`, merge_failure → `patterns`)
-   - Priority: 7+ for recurring issues
-3. If the user approves, create the rule and note it in the retro summary
-
-### Integration with /workforce-retro
-
-The rescue retro is a focused subset of `/workforce-retro`. When the user wants broader analysis (velocity, code quality, wins), suggest running the full retro.
+- `/workforce-retro`: Systemic velocity and failure trend analysis (weekly/sprint level)
+- `/workforce-eval`: Process failure evals into preventive knowledge rules
+- failure-forensics agent: Deep investigation with competing hypotheses (spawn for complex failures)

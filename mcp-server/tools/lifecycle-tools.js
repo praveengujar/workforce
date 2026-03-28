@@ -4,9 +4,54 @@
  */
 
 import { getTask, updateTask } from '../core/db.js';
-import { logEvent } from '../core/task-events.js';
+import { logEvent, getTaskTimeline } from '../core/task-events.js';
 import { mergeWorktree, cleanupWorktree } from '../core/worker-manager.js';
 import { gitExec } from '../core/constants.js';
+
+// ---------------------------------------------------------------------------
+// Gate enforcement — required evidence phases before merge
+// ---------------------------------------------------------------------------
+const REQUIRED_GATES = ['human_decision'];
+
+// Gates that are required only when the corresponding pipeline stage ran
+const CONDITIONAL_GATES = ['qa', 'security', 'adversarial'];
+
+/**
+ * Check if required gate evidence exists in task events.
+ * Returns { passed: boolean, missing: string[], waived: string[] }
+ */
+function validateGates(taskId, waivers = []) {
+  const events = getTaskTimeline(taskId);
+  const phases = new Set(events.map(e => e.phase));
+  const waiverSet = new Set(waivers.map(w => w.gate));
+
+  const missing = [];
+  const waived = [];
+
+  // Required gates must always be present (or waived)
+  for (const gate of REQUIRED_GATES) {
+    if (phases.has(gate)) continue;
+    if (waiverSet.has(gate)) {
+      waived.push(gate);
+      continue;
+    }
+    missing.push(gate);
+  }
+
+  // Conditional gates: only required if the stage was started (has a corresponding event)
+  for (const gate of CONDITIONAL_GATES) {
+    const started = phases.has(`${gate}_started`) || phases.has(`${gate}_required`);
+    if (!started) continue; // stage never ran — not required
+    if (phases.has(gate) || phases.has(`${gate}_passed`)) continue;
+    if (waiverSet.has(gate)) {
+      waived.push(gate);
+      continue;
+    }
+    missing.push(gate);
+  }
+
+  return { passed: missing.length === 0, missing, waived };
+}
 
 // ---------------------------------------------------------------------------
 // Module-level project dir — set once at startup via setProjectDir()
@@ -64,10 +109,30 @@ export function getDiffHandler({ task_id }) {
 // ---------------------------------------------------------------------------
 // approveTaskHandler
 // ---------------------------------------------------------------------------
-export async function approveTaskHandler({ task_id, reason }) {
+export async function approveTaskHandler({ task_id, reason, waivers }) {
   const task = getTask(task_id);
   if (!task) throw new Error('task not found');
   if (task.status !== 'review') throw new Error('task is not in review status');
+
+  // Gate enforcement — check required evidence before merge
+  const parsedWaivers = Array.isArray(waivers) ? waivers : [];
+  const gateResult = validateGates(task.id, parsedWaivers);
+
+  // Log waivers as auditable events
+  for (const w of parsedWaivers) {
+    logEvent(task.id, 'gate_waived', `${w.gate}: ${w.reason || 'no reason given'}`);
+  }
+
+  if (!gateResult.passed) {
+    const missingList = gateResult.missing.join(', ');
+    return {
+      ok: false,
+      merged: false,
+      error: `Gate enforcement: missing required evidence for [${missingList}]. Add gate events or provide waivers.`,
+      missingGates: gateResult.missing,
+      waivedGates: gateResult.waived,
+    };
+  }
 
   logEvent(task.id, 'approved', reason || 'Approved by user');
 
@@ -78,7 +143,7 @@ export async function approveTaskHandler({ task_id, reason }) {
   if (freshTask.status === 'failed' || freshTask.mergeFailed) {
     return { ok: false, merged: false, error: freshTask.error || 'Merge failed' };
   }
-  return { ok: true, merged: true };
+  return { ok: true, merged: true, waivedGates: gateResult.waived };
 }
 
 // ---------------------------------------------------------------------------

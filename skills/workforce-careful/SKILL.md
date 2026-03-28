@@ -1,104 +1,55 @@
 ---
 name: workforce-careful
-description: Safety guardrails for destructive commands. Intercepts rm -rf, DROP TABLE, git push --force, and other dangerous operations. Protects both user sessions and spawned agent tasks.
+description: Safety guardrails — intercepts destructive commands (rm -rf, DROP TABLE, git push --force) via PreToolUse hook. Protects both user sessions and spawned agent tasks.
 ---
 
-When the user invokes /workforce-careful, activate safety guardrails for the current session and all spawned agent tasks.
+When the user invokes /workforce-careful, activate safety guardrails.
 
-## What It Does
+## What It Intercepts
 
-Intercepts potentially destructive commands before execution via a PreToolUse hook on the Bash tool. Also injects a safety preamble into all spawned agent task prompts so autonomous agents self-regulate.
+| Pattern | Examples | Action |
+|---------|---------|--------|
+| Recursive deletion | `rm -rf`, `rm -r` | Ask confirmation |
+| Database destruction | `DROP TABLE`, `TRUNCATE` | Ask confirmation |
+| Git force push | `git push --force`, `git push -f` | Ask confirmation |
+| Git hard reset | `git reset --hard` | Ask confirmation |
+| Git discard all | `git checkout .`, `git restore .` | Ask confirmation |
+| Kubernetes deletion | `kubectl delete` | Ask confirmation |
+| Docker destruction | `docker rm -f`, `docker system prune` | Ask confirmation |
+| Process killing | `kill -9`, `killall` | Ask confirmation |
 
-## Intercepted Patterns
-
-| Pattern | Command Examples | Action |
-|---------|-----------------|--------|
-| **Recursive deletion** | `rm -rf`, `rm -r` | Ask confirmation |
-| **Database destruction** | `DROP TABLE`, `DROP DATABASE`, `TRUNCATE` | Ask confirmation |
-| **Git force push** | `git push --force`, `git push -f` | Ask confirmation |
-| **Git hard reset** | `git reset --hard` | Ask confirmation |
-| **Git discard all** | `git checkout .`, `git restore .` | Ask confirmation |
-| **Kubernetes deletion** | `kubectl delete` | Ask confirmation |
-| **Docker destruction** | `docker rm -f`, `docker system prune` | Ask confirmation |
-| **Process killing** | `kill -9`, `killall` | Ask confirmation |
-| **Disk wipe** | `dd if=`, `mkfs` | Ask confirmation |
-
-## Safe Exceptions
-
-No warning when recursive deletion targets only build artifacts:
-- `node_modules`, `.next`, `dist`, `__pycache__`, `.cache`, `build`, `.turbo`, `coverage`
-- `.pytest_cache`, `.mypy_cache`, `.tox`, `.venv`, `venv`, `.parcel-cache`
+**Safe exceptions** (no warning): `node_modules`, `.next`, `dist`, `build`, `coverage`, `__pycache__`, `.cache`, `.turbo`, `.venv`
 
 ## Steps
 
-1. Check if the careful hook is already configured:
-   - Look for `check-careful.sh` in `.claude/settings.json` or `.claude/settings.local.json`
-2. If not configured, install it:
-   - The hook script lives at `hooks/check-careful.sh` in the workforce plugin directory
-   - Guide the user to add the PreToolUse hook to their project settings (see Activation below)
-3. Set session context via `workforce_session_context` with action `set`, key `careful_mode`, value `active`
-   - This signals the worker-manager to inject the safety preamble into all spawned task prompts
-4. Confirm activation with a status card
+1. Check if hook is configured (look for `check-careful.sh` in settings)
+2. If not: guide setup (add PreToolUse hook to `.claude/settings.json` pointing to `hooks/check-careful.sh`)
+3. Set session context: `workforce_session_context` action `set`, key `careful_mode`, value `active`
+   - This injects safety preamble into all spawned agent tasks
+4. Confirm activation
 
-## Activation
-
-### Hook setup (user session protection)
+## Hook Setup
 
 Add to `.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /path/to/workforce/hooks/check-careful.sh"
-          }
-        ]
-      }
-    ]
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{ "type": "command", "command": "bash /path/to/workforce/hooks/check-careful.sh" }]
+    }]
   }
 }
 ```
 
-Replace `/path/to/workforce` with the actual plugin directory path.
-
-### Agent protection (spawned task injection)
-
-When `careful_mode` is `active` in session context, the following preamble is injected into every spawned task:
-
-> **SAFETY CONSTRAINT**: Before executing any destructive command (rm -rf, DROP TABLE, git push --force, git reset --hard, kubectl delete, docker rm -f), verify this is absolutely necessary and intentional. Never delete files outside your worktree scope. Never force-push. Never drop tables without explicit instruction. If unsure, skip the destructive operation and document what you would have done.
-
-## Template
+## Status
 
 ```
 ━━━ CAREFUL MODE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Status: {ACTIVE|INACTIVE}
-
-Hook protection (your session):
-  {✓|✗} PreToolUse hook {configured|needs setup}
-
-Agent protection (spawned tasks):
-  {✓|✗} Safety preamble injection {active|inactive}
-
-Intercepting:
-  ✓ Recursive deletion (rm -rf)
-  ✓ Database destruction (DROP/TRUNCATE)
-  ✓ Git force push / hard reset / discard
-  ✓ Kubernetes / Docker destruction
-  ✓ Process killing (kill -9)
-
-Safe exceptions: node_modules, dist, build, coverage, .cache
+Hook:  {✓ configured|✗ needs setup}
+Agent: {✓ preamble active|✗ inactive}
 ```
-
-## Deactivation
-
-To deactivate:
-1. Call `workforce_session_context` with action `set`, key `careful_mode`, value `inactive`
-2. Remove the hook from settings (optional — the hook is lightweight)
 
 ## Limitations
 
-This is a **workflow safety tool**, not a security boundary. It prevents accidental damage from autonomous agents and user commands. A command could still bypass it via pipes, heredocs, or indirect execution (e.g., `python -c "import shutil; shutil.rmtree('/')""`). The goal is catching the 95% case where an agent runs a destructive command without thinking.
+Workflow safety tool, not a security boundary. Prevents accidental damage — commands can still bypass via pipes or indirect execution.
