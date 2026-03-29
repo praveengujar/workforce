@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import {
   getAllTasks, getTask, createTask as dbCreateTask, updateTask,
   getRunningTasks, releaseTaskClaim, removeWorker,
@@ -27,6 +27,9 @@ import { DATA_DIR, ensureDir } from '../core/constants.js';
 export async function createTaskHandler({ prompt, project, autoMerge, parent_id, depends_on, group, phase, task_type }) {
   if (!prompt) throw new Error('prompt is required');
 
+  // Default project from cwd basename if not provided (ensures session context injection)
+  const effectiveProject = project || basename(process.cwd()) || 'default';
+
   // Validate depends_on references exist
   if (depends_on && Array.isArray(depends_on)) {
     for (const depId of depends_on) {
@@ -36,7 +39,7 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
   }
 
   const id = randomUUID();
-  let task = dbCreateTask({ id, prompt, project });
+  let task = dbCreateTask({ id, prompt, project: effectiveProject });
 
   // Set optional fields that createTask doesn't handle directly
   const extras = {};
@@ -120,6 +123,26 @@ export function listTasksHandler({ status_filter, include_archived } = {}) {
 export function getTaskHandler({ task_id }) {
   const task = getTask(task_id);
   if (!task) throw new Error('task not found');
+
+  // Enrich with gate status when task is in review or later
+  if (task.status === 'review' || task.status === 'done' || task.status === 'merging') {
+    const events = getTaskTimeline(task.id);
+    const phases = new Set(events.map(e => e.phase));
+    const gates = {
+      human_decision: phases.has('human_decision') ? 'passed' : 'missing',
+      qa: phases.has('qa_started') || phases.has('qa_required')
+        ? (phases.has('qa') || phases.has('qa_passed') ? 'passed' : phases.has('gate_waived') && events.some(e => e.phase === 'gate_waived' && e.detail?.startsWith('qa:')) ? 'waived' : 'missing')
+        : 'not_required',
+      security: phases.has('security_started') || phases.has('security_required')
+        ? (phases.has('security') || phases.has('security_passed') ? 'passed' : phases.has('gate_waived') && events.some(e => e.phase === 'gate_waived' && e.detail?.startsWith('security:')) ? 'waived' : 'missing')
+        : 'not_required',
+      adversarial: phases.has('adversarial_started') || phases.has('adversarial_required')
+        ? (phases.has('adversarial') || phases.has('adversarial_passed') ? 'passed' : phases.has('gate_waived') && events.some(e => e.phase === 'gate_waived' && e.detail?.startsWith('adversarial:')) ? 'waived' : 'missing')
+        : 'not_required',
+    };
+    return { ...task, gates };
+  }
+
   return task;
 }
 

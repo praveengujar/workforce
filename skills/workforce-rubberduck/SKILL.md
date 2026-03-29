@@ -1,76 +1,101 @@
 ---
 name: workforce-rubberduck
-description: Analyze and refine a task prompt before launching. Clarifies ambiguity, identifies risks, defines acceptance criteria, and outputs an improved prompt. Use before launching complex tasks.
+description: Multi-perspective task analysis — strategy, design, and engineering reviews to refine prompts before launching. Quick mode for engineering-only. Use before complex tasks. For full gated orchestration, use /workforce-autoplan instead.
 ---
 
-When the user invokes /workforce-rubberduck, deeply analyze a task prompt and refine it.
+When the user invokes /workforce-rubberduck, analyze a task prompt from multiple perspectives and refine it.
 
 ## Steps
 
-1. Take the user's task prompt (provided as argument or ask for it)
-2. Call `workforce_analyze_prompt` to get initial admission check and tier
-3. Perform deep analysis (see Analysis Framework below)
-4. Present the rubberduck report
-5. Output a refined, agent-ready prompt
-6. Offer to launch via `workforce_create_task` or feed into `/workforce-test-plan`
+1. Take the user's task prompt (argument or ask)
+2. Call `workforce_analyze_prompt` for tier and cost estimate
+3. Select applicable perspectives (see below)
+4. Run perspectives, synthesize findings
+5. Output refined prompt with acceptance criteria
+6. Offer: launch, test plan, or full `/workforce-autoplan`
 
-## Analysis Framework
+## Perspective Selection
 
-### Scope Check
-- What files/modules will this touch? Can you identify them from the prompt?
-- Is the scope bounded enough for a single agent run (<10 min)?
-- Are there hidden dependencies the prompt doesn't mention?
+| Perspective | Include When | Skip When |
+|---|---|---|
+| **Strategy** | New features, arch changes, scope decisions | Bug fixes, config changes |
+| **Design** | UI components, user flows, visual elements | Backend-only, infrastructure |
+| **Engineering** | Always | Never |
 
-### Ambiguity Check
-- Are there multiple valid interpretations of this prompt?
-- Are success criteria clear? How would you verify completion?
-- Are there assumptions that should be made explicit?
+Simple tasks (○ tier): engineering only. `/workforce-rubberduck quick` forces engineering-only.
 
-### Risk Assessment
-- Could this break existing functionality?
-- Does this touch auth, payments, data migrations, or other sensitive areas?
-- Are there edge cases the prompt should address?
-- Could this conflict with other running tasks?
+## Strategy Perspective
 
-### Acceptance Criteria
-- Define 3-5 concrete, verifiable acceptance criteria
-- Each should be testable (manually or automated)
-- Include both positive cases (it does X) and negative cases (it doesn't break Y)
+Challenges premises and manages scope:
+- Is this the right problem? Simpler alternatives?
+- Scope: minimal useful version or creeping?
+- Dependencies and trajectory
+- Outputs: validated/challenged premises, scope assessment, risk factors
 
-## Template — Rubberduck Report
+## Design Perspective
+
+Ensures intentional UX decisions:
+- Interaction states: loading, empty, error, success defined?
+- Responsive: mobile/tablet/desktop?
+- AI slop risk: will the prompt produce generic UI?
+- Outputs: completeness score (0-10), missing states, anti-slop warnings
+
+## Engineering Perspective
+
+Always runs:
+- **Scope**: files affected, bounded for single agent run, hidden dependencies
+- **Existing solutions**: already in repo? in dependencies? well-known library?
+- **Ambiguity**: multiple interpretations? assumptions to make explicit?
+- **Risk**: breaks existing functionality? sensitive areas? edge cases?
+- **Acceptance criteria**: 3-5 concrete, verifiable (positive + negative cases)
+
+## Report
 
 ```
 ━━━ RUBBERDUCK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Original: "{original_prompt}"
-Tier:     {tier_indicator} {tier}   Est: ~${cost}
+Original: "{prompt}"
+Tier:     {indicator} {tier}   Est: ~${cost}
+Perspectives: {Strategy ✓|—} {Design ✓|—} {Engineering ✓}
 
-SCOPE
-  Files likely affected: {file_list}
-  Bounded: {yes/no — reason}
+{STRATEGY — if ran}
+  Premises: {validated|challenged}
+  Scope: {expand|hold|reduce}
+  Risks: {list}
 
-AMBIGUITIES
-  {numbered list of ambiguities found, or "None detected"}
+{DESIGN — if ran}
+  Completeness: {n}/10
+  Missing states: {list}
+  AI slop risk: {low|medium|high}
 
-RISKS
-  {numbered list of risks, or "Low risk"}
+ENGINEERING
+  Files: {affected list}
+  Existing solutions: {found|none}
+  Ambiguities: {list or none}
+  Risks: {list or low}
 
 ACCEPTANCE CRITERIA
-  1. {criterion — verifiable}
-  2. {criterion — verifiable}
-  3. {criterion — verifiable}
+  1. {verifiable}
+  2. {verifiable}
+  3. {verifiable}
 
 REFINED PROMPT
-"{improved_prompt_with_file_paths_acceptance_criteria_and_constraints}"
+"{improved_prompt}"
 
-➤ Launch with refined prompt, edit further, or generate test plan?
+➤ Launch, run /workforce-autoplan, edit, or generate test plan?
 ```
 
 ## Prompt Refinement Rules
 
-When rewriting the prompt:
-- Add specific file paths where you can identify them from context
-- Add function/component names when identifiable
-- Include acceptance criteria inline (e.g., "Verify that X works by Y")
-- Add constraints from risk analysis (e.g., "Do not modify Z")
-- Keep it concise — agents work better with focused, specific prompts
+- Add specific file paths and function names when identifiable
+- Include acceptance criteria inline
+- Add constraints from risk analysis
+- Reflect adjusted scope if strategy challenged it
+- Keep concise — agents work better with focused prompts
 - Preserve the user's original intent
+
+## Related
+
+- `/workforce-autoplan`: Full gated orchestration (includes rubberduck as Stage 1)
+- `/workforce-pipeline`: Adaptive pipeline (includes rubberduck for complex tasks)
+- `/workforce-launch`: Direct launch without analysis
+- `/workforce-test-plan`: Generate test plan from the refined prompt

@@ -162,6 +162,17 @@ export function formatHealthMetrics(metrics, costSummary) {
     }
   }
 
+  // Eval stats
+  if (metrics.evalStats && metrics.evalStats.total > 0) {
+    lines.push('');
+    lines.push('  \u2500\u2500\u2500 evals \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+    const es = metrics.evalStats;
+    lines.push(`  Total: ${es.total}  |  Unprocessed: ${es.unprocessed}`);
+    const topCats = Object.entries(es.byCategory).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ');
+    if (topCats) lines.push(`  Top categories: ${topCats}`);
+    if (es.unprocessed > 0) lines.push(`  \u2192 Run /workforce-eval to review and process`);
+  }
+
   // Cost / usage section
   if (costSummary && costSummary.mode === 'subscription') {
     lines.push('');

@@ -4,9 +4,13 @@
  */
 
 import { getAllTasks } from '../core/db.js';
+import { getTaskEvents } from '../core/db.js';
 import { classifyTier } from '../core/cost-model.js';
 import { runRecoveryScan } from '../core/recovery-engine.js';
 import { getDateBoundaries, isSubscriptionMode } from '../core/constants.js';
+import { getEvalStats, clusterEvals } from '../core/eval-engine.js';
+import { lintRules } from '../core/knowledge-rules.js';
+import { routeTask } from '../core/capability-router.js';
 
 // ---------------------------------------------------------------------------
 // healthMetricsHandler
@@ -37,6 +41,10 @@ export function healthMetricsHandler() {
   if (oneShotRate < 0.5) suggestions.push('Low one-shot rate -- consider more specific prompts');
   if (retryRate > 0.4) suggestions.push('Many retries -- check for flaky tests or merge conflicts');
 
+  // Eval stats
+  let evalStats = null;
+  try { evalStats = getEvalStats(); } catch { /* eval table may not exist yet */ }
+
   return {
     doneRate: Math.round(doneRate * 100) / 100,
     failRate: Math.round(failRate * 100) / 100,
@@ -48,6 +56,7 @@ export function healthMetricsHandler() {
     recentTasks,
     total,
     improvementSuggestions: suggestions,
+    evalStats,
   };
 }
 
@@ -129,4 +138,89 @@ export function costSummaryHandler() {
 export function runRecoveryHandler() {
   const repairs = runRecoveryScan();
   return { repairs };
+}
+
+// ---------------------------------------------------------------------------
+// opsMetricsHandler — extended dashboard for gate/merge/rule quality
+// ---------------------------------------------------------------------------
+export function opsMetricsHandler() {
+  const allTasks = getAllTasks(true);
+
+  // Gate pass/fail rates
+  let gateChecks = 0, gatePasses = 0, gateBlocks = 0, gateWaivers = 0;
+  const mergeBlockReasons = {};
+  const postMergeResults = { passed: 0, failed: 0, skipped: 0 };
+
+  for (const task of allTasks) {
+    if (task.status !== 'done' && task.status !== 'failed' && task.status !== 'archived') continue;
+    try {
+      const events = getTaskEvents(task.id);
+      for (const ev of events) {
+        if (ev.phase === 'approved') gatePasses++;
+        if (ev.phase === 'gate_waived') gateWaivers++;
+        if (ev.phase === 'merge_failed') {
+          gateBlocks++;
+          const reason = ev.detail?.slice(0, 50) || 'unknown';
+          mergeBlockReasons[reason] = (mergeBlockReasons[reason] || 0) + 1;
+        }
+        if (ev.phase === 'post_merge_verify_passed') postMergeResults.passed++;
+        if (ev.phase === 'post_merge_verify_failed') postMergeResults.failed++;
+      }
+      if (task.status === 'done') gateChecks++;
+    } catch { /* ignore per-task errors */ }
+  }
+
+  // Eval clusters
+  let evalClusters = [];
+  try { evalClusters = clusterEvals(); } catch { /* ignore */ }
+
+  // Rule quality
+  let ruleLint = [];
+  try { ruleLint = lintRules(); } catch { /* ignore */ }
+
+  return {
+    gates: {
+      totalChecks: gateChecks,
+      passed: gatePasses,
+      blocked: gateBlocks,
+      waivers: gateWaivers,
+      passRate: gateChecks > 0 ? Math.round((gatePasses / gateChecks) * 100) / 100 : 0,
+    },
+    mergeBlockReasons,
+    postMergeVerification: postMergeResults,
+    evalClusters: evalClusters.map(c => ({
+      category: c.category,
+      evalCount: c.evalCount,
+      confidence: c.confidence,
+      suggestedRuleName: c.suggestedRule.name,
+    })),
+    ruleQuality: {
+      totalIssues: ruleLint.length,
+      issues: ruleLint.slice(0, 10), // top 10
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// routeTaskHandler — capability router
+// ---------------------------------------------------------------------------
+export function routeTaskHandler({ prompt, tier, file_paths }) {
+  return routeTask({ prompt, tier, filePaths: file_paths || [] });
+}
+
+// ---------------------------------------------------------------------------
+// evalClustersHandler — expose eval clustering
+// ---------------------------------------------------------------------------
+export function evalClustersHandler({ min_cluster_size, similarity_threshold } = {}) {
+  return clusterEvals({
+    minClusterSize: min_cluster_size || 3,
+    similarityThreshold: similarity_threshold || 0.7,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ruleLintHandler — expose rule lint
+// ---------------------------------------------------------------------------
+export function ruleLintHandler() {
+  return lintRules();
 }

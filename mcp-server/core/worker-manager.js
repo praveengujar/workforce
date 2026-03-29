@@ -12,6 +12,11 @@ import { spawn } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+  unlinkSync,
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -48,6 +53,8 @@ import {
 import { recordActualCost, classifyTier } from './cost-model.js';
 import { estimateTaskCost } from './task-cost.js';
 import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
+import { getRulesForPaths, getRulesForKeywords, extractPathsFromText } from './knowledge-rules.js';
+import { getAllSessionContext } from './session-context.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -83,6 +90,29 @@ function extractSessionId(stderr) {
  * Check whether any files changed in a worktree relative to a base commit.
  * Shared by both tmux and child_process exit handlers.
  */
+/**
+ * Detect a test command from project config.
+ * Returns { cmd, args } or null if no test command found.
+ */
+function detectTestCommand(repoRoot) {
+  try {
+    const pkgPath = join(repoRoot, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+        return { cmd: 'npm', args: ['test', '--', '--bail'] };
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    if (existsSync(join(repoRoot, 'Makefile'))) {
+      const mk = readFileSync(join(repoRoot, 'Makefile'), 'utf8');
+      if (mk.includes('test:')) return { cmd: 'make', args: ['test'] };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 function checkFilesChanged(worktreePath, baseCommit) {
   if (!worktreePath) return false;
   try {
@@ -407,7 +437,7 @@ ${effectivePrompt}`;
   try {
     const gitLog = gitExec(['log', '--oneline', '-5'], { cwd: repoRoot });
     if (gitLog) {
-      effectivePrompt += `\n\n[Context] Recent commits:\n${gitLog}`;
+      effectivePrompt += `\n\n[Context — Trust: HIGH] Recent commits:\n${gitLog}`;
     }
   } catch {
     // ignore
@@ -417,9 +447,10 @@ ${effectivePrompt}`;
   try {
     const memoryPath = join(repoRoot, '.claude', 'project-memory.md');
     if (existsSync(memoryPath)) {
-      const memory = readFileSync(memoryPath, 'utf8').trim();
+      let memory = readFileSync(memoryPath, 'utf8').trim();
       if (memory) {
-        effectivePrompt += `\n\n[Project Memory]\n${memory}`;
+        if (memory.length > 2000) memory = '...(truncated)\n' + memory.slice(-2000);
+        effectivePrompt += `\n\n[Project Memory — Trust: LOW]\n${memory}`;
       }
     }
   } catch {
@@ -430,13 +461,26 @@ ${effectivePrompt}`;
   try {
     const feedbackPath = join(DATA_DIR, 'feedback.jsonl');
     if (existsSync(feedbackPath)) {
-      const lines = readFileSync(feedbackPath, 'utf8').trim().split('\n').filter(Boolean);
+      const stat = statSync(feedbackPath);
+      let rawText;
+      if (stat.size > 102400) {
+        // Large file: read only the last 10KB to avoid blocking on huge files
+        const fd = openSync(feedbackPath, 'r');
+        const buf = Buffer.alloc(10240);
+        readSync(fd, buf, 0, 10240, stat.size - 10240);
+        closeSync(fd);
+        rawText = buf.toString('utf8');
+      } else {
+        rawText = readFileSync(feedbackPath, 'utf8');
+      }
+      const lines = rawText.trim().split('\n').filter(Boolean);
       const recent = lines.slice(-5);
       const examples = recent
         .map((line) => {
           try {
             const fb = JSON.parse(line);
-            return `  - [${fb.type}] ${fb.prompt}`;
+            const base = `  - [${fb.type}] ${fb.prompt}`;
+            return fb.correction ? `${base} -> Fix: ${fb.correction}` : base;
           } catch {
             return null;
           }
@@ -485,6 +529,62 @@ ${effectivePrompt}`;
         effectivePrompt += `\n\n[Shared Context]\n${capped}`;
       }
     } catch { /* ignore */ }
+  }
+
+  // Layer 7: Applicable knowledge rules (path-scoped + keyword-matched)
+  try {
+    const mentionedPaths = extractPathsFromText(task.prompt);
+    // Path-based matching (explicit file references in prompt)
+    let rules = mentionedPaths.length > 0 ? getRulesForPaths(mentionedPaths) : [];
+    // Keyword-based matching (high-level prompts without file paths)
+    if (rules.length === 0) {
+      rules = getRulesForKeywords(task.prompt);
+    }
+    if (rules.length > 0) {
+      // Deduplicate by rule ID
+      const seen = new Set();
+      const unique = rules.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+      let rulesBlock = '';
+      for (const rule of unique) {
+        const entry = `[${rule.category}] ${rule.name} (priority ${rule.priority})\n${rule.content}\n`;
+        if (rulesBlock.length + entry.length > 3000) break; // cap injection size
+        rulesBlock += entry + '\n';
+      }
+      if (rulesBlock) {
+        effectivePrompt += `\n\n[Knowledge Rules — Trust: MEDIUM]\n${rulesBlock.trim()}`;
+      }
+    }
+  } catch {
+    // ignore knowledge rules errors
+  }
+
+  // Layer 8: Session context (cross-session continuity)
+  if (task.project) {
+    try {
+      const SESSION_CTX_BUDGET = 1500;
+      let ctxBlock = '';
+
+      // Single query — extract active_focus from results (avoids double DB round-trip)
+      const contextEntries = getAllSessionContext(task.project);
+      const focusEntry = contextEntries.find(e => e.key === 'active_focus');
+      if (focusEntry) {
+        ctxBlock += `ACTIVE FOCUS: ${focusEntry.value}\n`;
+      }
+
+      // Fill remaining budget with other entries (recency-ordered, whole entries only)
+      for (const e of contextEntries) {
+        if (e.key === 'active_focus') continue;
+        const line = `${e.key}: ${e.value}\n`;
+        if (ctxBlock.length + line.length > SESSION_CTX_BUDGET) break; // evict whole entry, don't slice
+        ctxBlock += line;
+      }
+
+      if (ctxBlock) {
+        effectivePrompt += `\n\n[Session Context — Trust: LOW]\n${ctxBlock.trim()}`;
+      }
+    } catch {
+      // ignore session context errors
+    }
   }
 
   // 3. Spawn Claude CLI
@@ -709,7 +809,10 @@ async function handleTmuxWorkerExit(taskId, output) {
   logEvent(taskId, 'claude_exited', 'tmux session ended');
 
   const task = getTask(taskId);
-  if (!task) return;
+  if (!task) {
+    HANDLED_EXITS.delete(taskId);
+    return;
+  }
 
   const worktreePath = task.worktreePath;
   const cleanOutput = (output || '').slice(-4000);
@@ -737,21 +840,32 @@ async function handleTmuxWorkerExit(taskId, output) {
       gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
     } catch { /* may already be committed */ }
 
-    updateTask(taskId, {
-      status: 'review',
-      output: cleanOutput,
-      exitCode: 0,
-    });
-    logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+    if (task.autoMerge) {
+      updateTask(taskId, { output: cleanOutput, exitCode: 0 });
+      await mergeWorktree(task);
+    } else {
+      updateTask(taskId, {
+        status: 'review',
+        output: cleanOutput,
+        exitCode: 0,
+      });
+      logEvent(taskId, 'verification', 'Changes detected — awaiting review');
+    }
   } else {
+    // Distinguish crash from genuine zero-work: if task ran < 2 min, likely a crash
+    const runtimeMs = task.startedAt ? Date.now() - new Date(task.startedAt).getTime() : Infinity;
+    const isCrash = runtimeMs < 2 * 60 * 1000;
+    const errorMsg = isCrash
+      ? `Agent crashed after ${Math.round(runtimeMs / 1000)}s — no files changed (likely transient, will auto-retry)`
+      : 'No files changed — zero-work guard triggered';
     updateTask(taskId, {
       status: 'failed',
       output: cleanOutput,
-      error: 'No files changed — zero-work guard triggered',
+      error: errorMsg,
       exitCode: 0,
       completedAt: new Date().toISOString(),
     });
-    logEvent(taskId, 'failed', 'Zero-work guard');
+    logEvent(taskId, 'failed', isCrash ? 'Crash detected (short runtime, no changes)' : 'Zero-work guard');
     cleanupWorktree(taskId, worktreePath);
   }
 
@@ -770,7 +884,7 @@ async function handleTmuxWorkerExit(taskId, output) {
   removeToken(taskId);
 
   // Clean up prompt file
-  try { const { unlinkSync } = await import('node:fs'); unlinkSync(join(DATA_DIR, `${taskId}.prompt`)); } catch { /* ignore */ }
+  try { unlinkSync(join(DATA_DIR, `${taskId}.prompt`)); } catch { /* ignore */ }
 
   await promotePending();
 }
@@ -829,9 +943,16 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
       logEvent(taskId, 'verification', 'Changes detected — awaiting review');
     }
   } else {
-    const errorMsg = exitCode !== 0
-      ? `Claude exited with code ${exitCode}. ${stderr || ''}`.trim()
-      : 'No files changed — zero-work guard triggered';
+    let errorMsg;
+    if (exitCode !== 0) {
+      errorMsg = `Claude exited with code ${exitCode}. ${stderr || ''}`.trim();
+    } else {
+      const runtimeMs = freshTask?.startedAt ? Date.now() - new Date(freshTask.startedAt).getTime() : Infinity;
+      const isCrash = runtimeMs < 2 * 60 * 1000;
+      errorMsg = isCrash
+        ? `Agent crashed after ${Math.round(runtimeMs / 1000)}s — no files changed (likely transient, will auto-retry)`
+        : 'No files changed — zero-work guard triggered';
+    }
     updateTask(taskId, {
       status: 'failed',
       output,
@@ -913,6 +1034,27 @@ async function mergeWorktree(task) {
 
     // 5. Log merge
     logEvent(taskId, 'merge_completed');
+
+    // 6. Post-merge verification — run project test command if available
+    try {
+      const testCmd = detectTestCommand(repoRoot);
+      if (testCmd) {
+        logEvent(taskId, 'post_merge_verify_started', `Running: ${testCmd.cmd} ${testCmd.args.join(' ')}`);
+        try {
+          execFileSync(testCmd.cmd, testCmd.args, {
+            cwd: repoRoot, timeout: 120_000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          logEvent(taskId, 'post_merge_verify_passed', 'Tests passed after merge');
+        } catch (testErr) {
+          const stderr = testErr.stderr?.toString().slice(-500) || testErr.message;
+          logEvent(taskId, 'post_merge_verify_failed', `Tests failed: ${stderr}`);
+          // Don't fail the task — surface the signal, let human decide on rollback
+          updateTask(taskId, {
+            error: `Post-merge tests failed (merge succeeded). Consider: git revert HEAD. Error: ${stderr.slice(0, 200)}`,
+          });
+        }
+      }
+    } catch { /* ignore test detection errors */ }
   } catch (mergeErr) {
     // 3. Check if conflict is only status.md
     const errMsg = mergeErr.stderr?.toString() || mergeErr.message || '';

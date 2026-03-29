@@ -220,15 +220,25 @@ export function getReadyTasks() {
 // ---------------------------------------------------------------------------
 
 /**
- * Get all pending tasks whose dependencies include at least one failed task.
- * These should be cascade-failed.
+ * Get all pending tasks whose dependencies include at least one permanently failed task.
+ * A dependency is "permanently failed" only if it is failed AND has exhausted retries
+ * (retryCount >= maxRetries) or has no retry path (e.g., binary missing, hook blocked).
+ * This prevents premature cascade when a dependency is transiently failed but may recover.
  * @returns {Array} tasks that should be cascade-failed
  */
 export function getCascadeFailures() {
   const pending = getAllTasks().filter(t => t.status === 'pending' && t.dependsOn);
   return pending.filter(t => {
     const { failed } = resolveDependencies(t.id);
-    return failed.length > 0;
+    if (failed.length === 0) return false;
+    // Only cascade if ALL failed deps are permanently failed (exhausted retries)
+    return failed.every(depId => {
+      const dep = getTask(depId);
+      if (!dep) return true; // missing dep = permanent failure
+      const maxRetries = dep.maxRetries ?? 2;
+      const retryCount = dep.retryCount ?? 0;
+      return retryCount >= maxRetries;
+    });
   });
 }
 

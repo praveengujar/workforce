@@ -48,6 +48,36 @@ Then the diff:
 ```
 ````
 
+Then run the **weighted scoring system**:
+
+### Scoring
+
+1. Call `workforce_get_rules_for_path` with the changed file paths
+2. Check each rule against the diff — does the code comply?
+3. Score each category 0-3 (0=fail, 1=poor, 2=good, 3=excellent):
+
+```
+REVIEW SCORE
+┌─────────────────┬────────┬───────┬─────────────────────────────┐
+│ Category        │ Weight │ Score │ Notes                       │
+├─────────────────┼────────┼───────┼─────────────────────────────┤
+│ Correctness     │   3x   │  {s}  │ Does it solve the task?     │
+│ Security        │   3x   │  {s}  │ No new vulnerabilities?     │
+│ Test coverage   │   2x   │  {s}  │ Are changes tested?         │
+│ Code quality    │   2x   │  {s}  │ Clean, idiomatic code?      │
+│ Rule compliance │   2x   │  {s}  │ Follows knowledge rules?    │
+│ Scope           │   1x   │  {s}  │ No unrelated changes?       │
+├─────────────────┼────────┼───────┼─────────────────────────────┤
+│ Weighted total  │        │ {pct} │ {status}                    │
+└─────────────────┴────────┴───────┴─────────────────────────────┘
+```
+
+**Thresholds**:
+- >= 65%: Recommend APPROVE
+- 50-64%: Recommend CONDITIONAL APPROVE with fix suggestions
+- < 50%: Recommend REJECT with specific issues to fix
+- Any Security score of 0: override to REJECT regardless of total
+
 Then your analysis (2-3 sentences max) and:
 
 ```

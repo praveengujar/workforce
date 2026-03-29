@@ -1,86 +1,91 @@
 ---
 name: workforce-pipeline
-description: Run the full orchestration pipeline for a task — rubberduck, launch, test plan, QA, human review, merge. Use when you want the complete quality flow from prompt to merge.
+description: Adaptive orchestration pipeline — auto-skips stages based on task complexity. For strict gated orchestration with mandatory human approval, use /workforce-autoplan instead.
 ---
 
-When the user invokes /workforce-pipeline, orchestrate a complete task lifecycle with quality gates.
+When the user invokes /workforce-pipeline, orchestrate a task lifecycle with adaptive quality gates.
+
+## How It Differs From /workforce-autoplan
+
+| | /workforce-pipeline | /workforce-autoplan |
+|---|---|---|
+| **Philosophy** | Adaptive — skips stages for simple tasks | Strict — every gate mandatory |
+| **Human gate** | At review stage | Mandatory, never skipped |
+| **Auto-merge** | Allowed for simple tasks | Never |
+| **Best for** | Day-to-day tasks across all tiers | High-stakes or complex features |
 
 ## Pipeline Stages
 
 ```
-rubberduck → launch → [agent codes] → test plan → QA → human review → merge
+pre-scan → rubberduck → launch → test plan → QA → security → adversarial → review → merge
 ```
 
-Each stage is optional and skippable. The pipeline adapts based on task complexity.
+Each stage is **optional and skippable**. Adaptive behavior selects which stages run.
+
+## Adaptive Behavior
+
+- **Simple (○, <$0.10)**: Pre-scan → Launch → Review → Merge
+- **Medium (●, $0.10-$0.50)**: Pre-scan → Launch → Test Plan → QA → Review → Merge
+- **Complex (◉, >$0.50)**: Full pipeline including Security + Adversarial
+- **Security-sensitive** (auth/payments/secrets): Always include Security regardless of tier
+- **User override**: "skip QA", "skip security" — honor immediately
 
 ## Steps
 
-### Stage 1: Rubberduck (skip for simple/○ tasks)
-1. Run the rubberduck analysis (same as /workforce-rubberduck)
-2. Present refined prompt and acceptance criteria
-3. On approval, proceed to launch
+### Stage 0: Pre-scan (always)
+1. `workforce_dependency_graph` build + impact query
+2. `workforce_get_rules_for_path` for mentioned files
+3. Present: impact radius, applicable rules, risk level, recommendation
+
+### Stage 1: Rubberduck (complex only)
+Run `/workforce-rubberduck` analysis, present refined prompt, proceed on approval.
 
 ### Stage 2: Launch
-1. Call `workforce_create_task` with the refined prompt
-2. Show the launch card
-3. Wait for task to complete (move to `review` status)
-4. Periodically check status via `workforce_get_task`
+`workforce_create_task` → wait for `review` status via `workforce_get_task`.
 
-### Stage 3: Test Plan (skip for non-UI/non-API tasks)
-1. Once task is in `review`, run test plan analysis (same as /workforce-test-plan)
-2. Present the test plan
-3. On approval, proceed to QA
+### Stage 3: Test Plan (medium+, UI/API only)
+Run `/workforce-test-plan` analysis, present plan.
 
-### Stage 4: QA (skip if no testable behaviors)
-1. Create QA task(s) based on the test plan (same as /workforce-qa)
-2. QA tasks auto-launch since `review` satisfies dependencies
-3. Wait for QA task(s) to complete
-4. Report QA results
+### Stage 4: QA (medium+, testable behaviors only)
+Create QA tasks via `/workforce-qa`, wait for completion.
 
-### Stage 5: Human Review
-1. Show the diff via `workforce_get_diff`
-2. Show QA results (if QA was run)
-3. Show the test plan checklist (if generated)
-4. Ask for human decision: approve or reject (with reason)
+### Stage 5: Security (complex or security-sensitive)
+Run `/workforce-cso` in task mode. CRITICAL → block merge. HIGH → warn.
 
-### Stage 6: Merge (on approve)
-1. Call `workforce_approve_task` with the approval reason
-2. Report merge result (success, conflict, or failure)
-3. If merge fails, offer to create a fix-up task
+### Stage 6: Adversarial (complex, diffs ≥50 lines)
+Run `/workforce-adversarial` in task mode. Low agreement (<40%) → flag.
 
-## Template — Pipeline Status
+### Stage 7: Review
+Show diff, QA results, security summary, adversarial summary. Ask: approve or reject.
+
+### Stage 8: Merge
+`workforce_approve_task` → report result. Merge failure → offer fix-up task.
+
+## Status Card
 
 ```
 ━━━ PIPELINE: {id_8} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Prompt: "{prompt_40}..."
 
-  ✓ Rubberduck    Refined prompt, 4 acceptance criteria
-  ✓ Launch        Task running (slot 2/10)
-  ● Code          Agent working... {elapsed}
-  ○ Test Plan     Waiting for code completion
-  ○ QA            Waiting for test plan
-  ○ Review        Waiting for QA
-  ○ Merge         Waiting for approval
+  ✓ Pre-scan     {risk} risk, {rules} rules
+  ✓ Launch       Slot {n}/{max}
+  ● Code         Agent working... {elapsed}
+  ○ QA           Waiting
+  ○ Review       Waiting
+  ○ Merge        Waiting
 ```
 
-Update this status card as each stage completes.
-
-## Adaptive Behavior
-
-- **Simple tasks (○ tier, <$0.10)**: Skip rubberduck and test plan. Launch → Review → Merge.
-- **Medium tasks (● tier, $0.10-$0.50)**: Skip rubberduck. Launch → Test Plan → QA → Review → Merge.
-- **Complex tasks (◉ tier, >$0.50)**: Full pipeline. Rubberduck → Launch → Test Plan → QA → Review → Merge.
-- **User override**: "skip QA", "skip rubberduck" — honor immediately.
+Stages not applicable for this tier are omitted from the card.
 
 ## Error Handling
 
-- If code stage fails: offer /workforce-rescue for diagnosis
-- If QA fails: show QA output, offer to fix and re-run
-- If merge fails: show conflict details, offer fix-up task
-- If human rejects: show rejection reason, offer to create retry task with feedback incorporated
+- Code fails → `/workforce-rescue`
+- QA fails → show output, offer fix
+- Merge fails → conflict details, fix-up task
+- Human rejects → retry with feedback
 
-## Conversation Style
+## Related
 
-- Don't ask permission at every stage — execute the appropriate pipeline and pause only at decision points (approve/reject)
-- Show the pipeline status card after each stage transition
-- If the user is watching, provide brief updates. If async, summarize at the end.
+- `/workforce-autoplan`: Strict gated orchestrator (every stage mandatory, never auto-merges)
+- `/workforce-launch`: Direct launch with no pipeline
+- `/workforce-rubberduck`: Standalone prompt refinement
