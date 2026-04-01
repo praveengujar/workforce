@@ -1,4 +1,4 @@
-# Workforce v2.2.0
+# Workforce v3.0.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 
@@ -240,7 +240,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v2.2.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v3.0.0)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
@@ -286,7 +286,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 29 slash commands (7 new in v2.2.0)
+├── skills/                        # 29 slash commands (7 new in v3.0.0)
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-launch/          # Task creation flow
 │   ├── workforce-review/          # Diff review + weighted scoring

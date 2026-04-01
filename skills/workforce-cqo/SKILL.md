@@ -1,0 +1,84 @@
+---
+name: workforce-cqo
+description: "Chief Quality Officer — E2E testing, test plans, quality gate status. Default: qa."
+---
+
+When the user invokes /workforce-cqo, handle quality assurance. Parses first word as action.
+
+## Default Action: qa
+
+If no action specified, create QA tasks for work in review.
+
+## Actions
+
+### qa (default)
+Generate and run E2E tests for tasks in review. `/workforce-cqo` or `/workforce-cqo qa`
+
+1. `workforce_list_tasks` with `status_filter: "review"`
+2. For each: `workforce_task_output` + `workforce_get_diff`
+3. Determine strategy by change type:
+
+| Change Type | Test Approach |
+|-------------|---------------|
+| Web UI (.tsx/.jsx) | Playwright browser tests |
+| API endpoints | Playwright API testing |
+| Mobile responsive | Playwright viewport emulation |
+| Forms | Fill, submit, validate |
+| Auth flows | Login flow, protected routes |
+| No UI | Skip E2E, suggest unit tests |
+
+4. Present QA plan, on approval create QA tasks via `workforce_create_task` with `depends_on`
+
+```
+━━━ CQO QA PLAN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Task: {id_8}  Strategy: {approach}
+  ○ E2E: {test_description}
+  Est: ~${est}
+➤ Create QA tasks, modify, or skip?
+```
+
+**Interactive mode**: When Playwright MCP tools are available, use `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill_form`, `browser_take_screenshot` for quick smoke tests during review.
+
+### testplan
+Generate test strategy before or during review. `/workforce-cqo testplan <task_id>`
+
+1. Analyze task diff or prompt for testable behaviors
+2. Classify: P0 (must test), P1 (should test), P2 (nice to have)
+3. Identify edge cases
+
+```
+━━━ CQO TEST PLAN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Task: {id_8}  Strategy: {e2e|unit|integration}
+
+P0 — MUST TEST
+  □ {test} — {verify}
+P1 — SHOULD TEST
+  □ {test} — {verify}
+EDGE CASES
+  □ {case} — {expected}
+
+➤ Create QA tasks from plan, or edit?
+```
+
+### gates
+Show quality gate status for a task. `/workforce-cqo gates <task_id>`
+
+1. `workforce_get_task` (includes gates field) + `workforce_task_events`
+2. Show which gates passed, waived, missing
+
+```
+━━━ CQO GATES: {id_8} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✓ Created        {timestamp}
+  ✓ Code Complete  {timestamp}
+  ⚠ Test Plan      Not found
+  ✗ QA             Missing
+  ○ Human Decision Pending
+
+RECOMMENDATION: {based on tier and missing gates}
+➤ Proceed to approve, or run missing gates?
+```
+
+## Related
+
+- `/workforce-cto review` — Code review scoring (CQO tests, CTO reviews)
+- `/workforce-ceo` — QA is a mandatory stage in CEO orchestration
