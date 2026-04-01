@@ -8,7 +8,7 @@
  * No Express, no WebSocket — pure lifecycle logic.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
@@ -17,6 +17,8 @@ import {
   readSync,
   closeSync,
   unlinkSync,
+  symlinkSync,
+  lstatSync,
 } from 'node:fs';
 import { appendFile as appendFileAsync } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -111,6 +113,72 @@ function detectTestCommand(repoRoot) {
     }
   } catch { /* ignore */ }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Worktree environment setup — ensure deps are available for test/build tasks
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect project type and set up worktree environment.
+ * Symlinks node_modules from main workspace (fast, avoids full npm install).
+ * For monorepos (Turborepo/pnpm/yarn workspaces), symlinks the root node_modules
+ * and any workspace package node_modules.
+ */
+function setupWorktreeEnvironment(worktreePath, repoRoot) {
+  try {
+    // Symlink root node_modules if it exists
+    const rootNodeModules = join(repoRoot, 'node_modules');
+    const worktreeNodeModules = join(worktreePath, 'node_modules');
+    if (existsSync(rootNodeModules) && !existsSync(worktreeNodeModules)) {
+      try {
+        symlinkSync(rootNodeModules, worktreeNodeModules, 'junction');
+        logEvent('_system', 'worktree_setup', `Symlinked node_modules → ${worktreePath}`);
+      } catch { /* may fail on some platforms — non-fatal */ }
+    }
+
+    // Detect monorepo and symlink workspace package node_modules
+    const pkgPath = join(repoRoot, 'package.json');
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+        const workspaces = pkg.workspaces || (pkg.workspaces?.packages);
+        if (Array.isArray(workspaces)) {
+          // Symlink each workspace's node_modules
+          for (const wsGlob of workspaces) {
+            const wsBase = wsGlob.replace('/*', '').replace('/**', '');
+            const srcDir = join(repoRoot, wsBase);
+            const dstDir = join(worktreePath, wsBase);
+            if (!existsSync(srcDir)) continue;
+            // Find actual workspace dirs (apps/web, packages/shared, etc.)
+            try {
+              const entries = execFileSync('ls', ['-1', srcDir], { encoding: 'utf8', timeout: 5000 })
+                .trim().split('\n').filter(Boolean);
+              for (const entry of entries) {
+                const srcNM = join(srcDir, entry, 'node_modules');
+                const dstNM = join(dstDir, entry, 'node_modules');
+                if (existsSync(srcNM) && !existsSync(dstNM)) {
+                  try { symlinkSync(srcNM, dstNM, 'junction'); } catch { /* non-fatal */ }
+                }
+              }
+            } catch { /* ignore ls errors */ }
+          }
+        }
+      } catch { /* ignore package.json parse errors */ }
+    }
+
+    // Symlink .env files (test tasks need env vars)
+    for (const envFile of ['.env', '.env.local', '.env.development']) {
+      const srcEnv = join(repoRoot, envFile);
+      const dstEnv = join(worktreePath, envFile);
+      if (existsSync(srcEnv) && !existsSync(dstEnv)) {
+        try { symlinkSync(srcEnv, dstEnv, 'file'); } catch { /* non-fatal */ }
+      }
+    }
+  } catch (err) {
+    // Worktree setup is best-effort — don't fail the task
+    console.error(`[worktree-setup] Warning: ${err.message}`);
+  }
 }
 
 function checkFilesChanged(worktreePath, baseCommit) {
@@ -383,6 +451,9 @@ async function spawnWorker(task) {
   } catch (err) {
     throw new Error(`git worktree add failed: ${err.stderr?.toString() || err.message}`);
   }
+
+  // 1b. Set up worktree environment (symlink node_modules, .env files)
+  setupWorktreeEnvironment(worktreePath, repoRoot);
 
   // Record the base commit so zero-work guard can compare against it (not HEAD)
   let baseCommit;
@@ -1116,6 +1187,16 @@ function cleanupWorktree(taskId, worktreePath) {
 
   const repoRoot = PROJECT_DIR;
   const branchName = `wf/${taskId}`;
+
+  // Remove symlinks before worktree removal (prevents deleting main workspace files)
+  for (const target of ['node_modules', '.env', '.env.local', '.env.development']) {
+    const linked = join(worktreePath, target);
+    try {
+      if (existsSync(linked) && lstatSync(linked).isSymbolicLink()) {
+        unlinkSync(linked);
+      }
+    } catch { /* non-fatal */ }
+  }
 
   let attempts = 0;
   const maxAttempts = 3;
