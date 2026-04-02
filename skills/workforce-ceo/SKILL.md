@@ -1,0 +1,93 @@
+---
+name: workforce-ceo
+description: "Chief Executive Officer — strict gate-driven orchestrator: pre-scan, rubberduck, test plan, code, QA, review, human decision, merge. Never auto-merges. Default: plan."
+---
+
+When the user invokes /workforce-ceo, run the strict gated orchestrator. This is the same as the former /workforce-autoplan.
+
+## Default Action: plan
+
+If no action specified, run the full orchestration pipeline.
+
+## Actions
+
+- **plan** (default) — Full gated orchestration (pre-scan → rubberduck → test plan → code → QA → review → human gate → merge)
+- **pipeline** — Adaptive pipeline that skips stages for simple tasks (former /workforce-pipeline)
+
+## Contract (plan mode)
+
+- Always run stages in order: `pre-scan → rubberduck → test plan → code loop → QA → review → human decision → merge`
+- Never skip the human decision gate
+- Never auto-merge
+- Every gate must produce evidence in the status card
+
+## Stage Flow (plan mode)
+
+### Stage 0: Intake + Pre-scan (mandatory)
+1. Call `workforce_analyze_prompt`
+2. Extract file paths, call `workforce_dependency_graph` build
+3. If paths exist: `workforce_get_rules_for_path` + `workforce_dependency_graph` query_impact
+4. Produce: risk level, impacted files, applicable rules, go/no-go
+
+### Stage 1: Rubberduck (mandatory)
+1. Refine prompt into execution spec with acceptance criteria, non-goals, risk notes
+2. If ambiguous, stop and ask for clarification
+3. Save refined prompt as gate evidence
+
+### Stage 2: Test Plan (mandatory)
+1. Build P0/P1/P2 test plan before coding
+2. Save P0 and P1 checks as QA requirements
+
+### Stage 3: Code Loop (mandatory)
+1. `workforce_create_task` with refined prompt, `autoMerge: false`
+2. Track via `workforce_get_task` until `review` or `failed`
+3. On failure: inspect + retry (max 2 attempts in orchestrator)
+4. Still failed → stop and report
+
+### Stage 4: QA (mandatory)
+1. Create QA task(s) depending on implementation task
+2. QA prompts include P0/P1 checks from Stage 2
+3. Wait for completion. Failure → stop and report
+
+### Stage 5: Review (mandatory)
+1. `workforce_get_diff`, summarize changes, risk highlights, QA outcome
+2. Prepare approval recommendation — do NOT merge yet
+
+### Stage 6: Human Decision (mandatory)
+1. Ask for explicit: `approve` or `reject` with reason
+2. Rejected → `workforce_reject_task`, stop
+
+### Stage 7: Merge (approve path only)
+1. `workforce_approve_task`
+2. Report merge outcome. Failure → fix-up task recommendation
+
+## Adaptive Pipeline (pipeline action)
+
+When invoked as `/workforce-ceo pipeline`:
+- **Simple (○)**: Pre-scan → Launch → Review → Merge
+- **Medium (●)**: Pre-scan → Launch → Test Plan → QA → Review → Merge
+- **Complex (◉)**: Full pipeline including Security + Adversarial
+- **Security-sensitive**: Always include `/workforce-cso` regardless of tier
+- Stages skip automatically based on tier. "skip QA", "skip security" honored.
+
+## Gate Evidence Template
+
+```
+━━━ CEO ORCHESTRATOR ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Prompt: {prompt_60}...
+Task: {task_id_or_pending}
+
+[0] Pre-scan      {status}  Evidence: {risk, impact, rules}
+[1] Rubberduck    {status}  Evidence: {refined_prompt, AC_count}
+[2] Test Plan     {status}  Evidence: {P0_count, P1_count}
+[3] Code Loop     {status}  Evidence: {status, retries_used}
+[4] QA            {status}  Evidence: {qa_task_ids, result}
+[5] Review        {status}  Evidence: {files_changed, key_risks}
+[6] Human Gate    {status}  Evidence: {approve|reject, reason}
+[7] Merge         {status}  Evidence: {merged|conflict|failed}
+```
+
+## Related
+
+- `/workforce-coo` — Direct task operations (launch, chain, sprint)
+- `/workforce-cto` — Technical review and analysis

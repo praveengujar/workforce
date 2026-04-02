@@ -183,20 +183,33 @@ function setupWorktreeEnvironment(worktreePath, repoRoot) {
 
 function checkFilesChanged(worktreePath, baseCommit) {
   if (!worktreePath) return false;
+
+  // Check 1: committed changes vs base (staged diffs + new commits)
   try {
     const compareRef = baseCommit || 'HEAD';
     const diff = gitExec(['diff', '--stat', compareRef], { cwd: worktreePath });
     if (diff.length > 0) return true;
     const logCount = gitExec(['rev-list', '--count', `${compareRef}..HEAD`], { cwd: worktreePath });
-    return parseInt(logCount, 10) > 0;
-  } catch {
-    try {
-      const untracked = gitExec(['status', '--porcelain'], { cwd: worktreePath });
-      return untracked.length > 0;
-    } catch {
-      return false;
-    }
-  }
+    if (parseInt(logCount, 10) > 0) return true;
+  } catch { /* fall through to status check */ }
+
+  // Check 2: ALWAYS check for untracked/unstaged files (the critical fix).
+  // Agents often write files but don't git-add them. Without this check,
+  // the zero-work guard destroys their work.
+  try {
+    const status = gitExec(['status', '--porcelain'], { cwd: worktreePath });
+    // Filter out symlinked node_modules and .env files (from worktree setup)
+    const realChanges = status.split('\n').filter(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (trimmed.endsWith('node_modules')) return false;
+      if (trimmed.endsWith('.env') || trimmed.endsWith('.env.local') || trimmed.endsWith('.env.development')) return false;
+      return true;
+    });
+    if (realChanges.length > 0) return true;
+  } catch { /* ignore */ }
+
+  return false;
 }
 
 /**
@@ -904,8 +917,12 @@ async function handleTmuxWorkerExit(taskId, output) {
     extractResultSummary(taskId, cleanOutput || output || '');
     cleanupWorktree(taskId, worktreePath);
   } else if (filesChanged) {
-    // Commit changes
+    // Commit changes — stage all real files (excluding setup symlinks)
     try {
+      // Remove symlinks from git tracking before staging
+      for (const f of ['.env', '.env.local', '.env.development']) {
+        try { gitExec(['rm', '--cached', '--ignore-unmatch', f], { cwd: worktreePath }); } catch { /* ignore */ }
+      }
       gitExec(['add', '-A'], { cwd: worktreePath });
       const commitMsg = `wf: ${(task.prompt || 'Task work').slice(0, 72)}`;
       gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
@@ -997,6 +1014,9 @@ async function handleWorkerExit(task, exitCode, stdout, stderr) {
     cleanupWorktree(taskId, worktreePath);
   } else if (exitCode === 0 && filesChanged) {
     try {
+      for (const f of ['.env', '.env.local', '.env.development']) {
+        try { gitExec(['rm', '--cached', '--ignore-unmatch', f], { cwd: worktreePath }); } catch { /* ignore */ }
+      }
       gitExec(['add', '-A'], { cwd: worktreePath });
       const commitMsg = `wf: ${(task.prompt || 'Task work').slice(0, 72)}`;
       gitExec(['commit', '-m', commitMsg, '--allow-empty'], { cwd: worktreePath });
