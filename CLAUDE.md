@@ -11,8 +11,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 ## Stack
 
 - **MCP server** (stdio) — 52 tools for task lifecycle, backlog, monitoring, context management, ops dashboard
-- **Skills** — 13 C-suite officer skills (see Skill Routing below)
-- **Agents** — 9 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor
+- **Skills** — 14 C-suite officer skills (see Skill Routing below)
+- **Agents** — 10 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
 - **Dependency** — `@modelcontextprotocol/sdk`
 
@@ -96,6 +96,7 @@ Weighted: Correctness (3x), Security (3x), Test coverage (2x), Code quality (2x)
 | `/workforce-cao` | Chief Audit Officer | rescue | rescue, forensics, cleanup |
 | `/workforce-cqo` | Chief Quality Officer | qa | qa, testplan, gates |
 | `/workforce-cdo` | Chief Design Officer | consult | consult, shotgun |
+| `/workforce-cplo` | Chief Planning Officer | plan | plan, scan, impact |
 
 ## Tmux environment
 
