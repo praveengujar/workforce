@@ -25,7 +25,8 @@
     "./agents/cqo-engineer.md",
     "./agents/cto-analyst.md",
     "./agents/cio-curator.md",
-    "./agents/cso-auditor.md"
+    "./agents/cso-auditor.md",
+    "./agents/cplo-architect.md"
   ],
   "mcpServers": "./.mcp.json"
 }
