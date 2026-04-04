@@ -10,9 +10,10 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 
 ## Stack
 
-- **MCP server** (stdio) — 52 tools for task lifecycle, backlog, monitoring, context management, ops dashboard
+- **MCP server** (stdio) — 53 tools for task lifecycle, backlog, monitoring, context management, ops dashboard, loop detection
 - **Skills** — 14 C-suite officer skills (see Skill Routing below)
 - **Agents** — 10 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect
+- **Loop detection** — Ralph Wiggum detector catches agents stuck in unproductive cycles
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
 - **Dependency** — `@modelcontextprotocol/sdk`
 
@@ -25,8 +26,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
   - `tools/` — Task, lifecycle, backlog, monitoring, knowledge, eval, session, graph tool handlers
   - `config/` — Defaults, metrics targets
   - `test/` — node:test smoke tests (lifecycle, recovery, eval, deps, router)
-- `skills/` — 13 SKILL.md files (C-suite officers)
-- `agents/` — 9 agent definitions
+- `skills/` — 14 SKILL.md files (C-suite officers)
+- `agents/` — 10 agent definitions
 - `hooks/` — SessionStart cleanup, SessionEnd eval analysis, PreToolUse safety guardrails
 
 ## Task lifecycle
@@ -38,7 +39,7 @@ Phases: `pending → running → review → merging → done/failed`
 - Up to 5 concurrent tasks (configurable via WORKFORCE_MAX_CONCURRENT)
 - Watchdog kills tasks running > 30 min (configurable via WORKFORCE_TASK_TIMEOUT)
 - Zero-work guard: no real code changes → marked `failed`
-- Recovery engine detects 6 failure patterns every 30s, auto-creates eval entries
+- Recovery engine detects 8 failure patterns every 30s (including Ralph Wiggum loop detection), auto-creates eval entries
 - Post-merge verification: detects test command, runs after merge, logs pass/fail
 
 ## Task types
@@ -78,7 +79,15 @@ Weighted: Correctness (3x), Security (3x), Test coverage (2x), Code quality (2x)
 
 ## Gate enforcement
 
-`workforce_approve_task` validates required gate evidence before merge. `human_decision` always required. Conditional gates (qa, security, adversarial) required if started. Waivers supported with auditable reason logging.
+`workforce_approve_task` validates required gate evidence before merge. `human_decision` always required. Conditional gates (qa, security, adversarial) required if started. Waivers supported with auditable reason logging. All critical decision points use `AskUserQuestion` tool for structured human input — the LLM cannot auto-decide.
+
+## Ralph Wiggum loop detection
+
+Recovery engine Rules 6a/6b detect agents stuck in unproductive loops:
+- **Rule 6a**: Same error hash on 2+ consecutive retries → `loopDetected: same_error_Nx`, creates `ralph_wiggum_loop` eval
+- **Rule 6b**: Running >5 min with no file changes (git status) → `loopDetected: no_progress_Nm`
+- Dashboard (`/workforce`) surfaces ⚠ alerts with `AskUserQuestion` escalation: Hint (inject guidance via tmux) / Analyze (switch to investigation) / Kill (rewrite prompt) / Continue
+- `workforce_loop_status` MCP tool returns active loops, long-running tasks, summary counts
 
 ## Skill Routing (C-Suite)
 
