@@ -309,6 +309,16 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(12, new Date().toISOString());
     console.error('[db] Applied migration 12: session_context table');
   }
+  // Migration 13: Ralph Wiggum loop detection fields
+  const m13 = db.prepare('SELECT version FROM schema_migrations WHERE version = 13').get();
+  if (!m13) {
+    try {
+      db.exec("ALTER TABLE tasks ADD COLUMN loopDetected TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN lastErrorHash TEXT");
+    } catch { /* columns may already exist */ }
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(13, new Date().toISOString());
+    console.error('[db] Applied migration 13: Ralph Wiggum loop detection fields');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +358,7 @@ const TASK_COLUMNS = new Set([
   'tmuxSession', 'autoMerge', 'profile',
   'taskType', 'experimentConfig',
   'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter', 'targetBranch', 'baseCommit',
+  'loopDetected', 'lastErrorHash',
 ]);
 
 export function updateTask(id, updates) {

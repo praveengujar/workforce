@@ -1,4 +1,4 @@
-# Workforce v3.0.0
+# Workforce v3.1.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 
@@ -20,6 +20,9 @@ Workforce lets you run multiple Claude Code agents in parallel, each working on 
 - **Design system**: Generate complete design systems with anti-AI-slop enforcement and multi-variant exploration
 - **Engineering retros**: Task performance analytics, failure pattern analysis, velocity metrics, and cost efficiency trends
 - **Multi-perspective planning**: CEO strategy, design UX, and engineering architecture reviews before launching complex tasks
+- **Full-stack planning**: Chief Planning Officer auto-detects 13 stack layers, maps cross-layer impact, generates phased implementation plans
+- **Loop detection**: Ralph Wiggum detector catches agents stuck repeating the same failure or spinning with no progress
+- **Structured human gates**: AskUserQuestion at 7 critical decision points prevents LLM auto-deciding on merges, costs, and reviews
 
 ## Install
 
@@ -63,26 +66,19 @@ cd /path/to/workforce/mcp-server && npm install
 Once installed, use these slash commands inside Claude Code:
 
 ```
-/workforce                          # Dashboard — see all running tasks, queue, costs
-/workforce-launch "fix the login bug"   # Spawn an agent task
-/workforce-review                   # Review completed task diffs with scoring
-/workforce-rules                    # Manage domain knowledge rules
-/workforce-eval                     # Review failure evals, convert to rules
-/workforce-context                  # View/update session context and focus
-/workforce-backlog                  # Manage work items
-/workforce-health                   # Performance metrics, cost tracking, eval stats
-/workforce-decompose "big task"     # Break complex work into subtasks
-/workforce-rescue                   # Diagnose and recover failed tasks
-/workforce-pipeline "task"          # Full pipeline: pre-scan → rubberduck → code → QA → review → merge
-/workforce-autoplan "task"          # Strict gated orchestrator: pre-scan → plan → code → QA → review → human gate → merge
-/workforce-chain                    # Create sequential task chains
-/workforce-experiment               # Run iterative optimization experiments
-/workforce-careful                  # Activate safety guardrails for destructive commands
-/workforce-cso                      # Run 14-phase security audit
-/workforce-adversarial              # Cross-model adversarial review (Claude + Codex)
-/workforce-retro                    # Engineering retrospective with velocity metrics
-/workforce-design                   # Design system consultation → DESIGN.md
-/workforce-design-shotgun           # Multi-variant design exploration (3-8 options)
+/workforce                              # Boardroom dashboard (alerts, tasks, health, cost)
+/workforce-ceo "build feature X"        # CEO — strict gated orchestrator (plan → code → QA → review → merge)
+/workforce-coo "fix the login bug"      # COO — launch task (also: chain, sprint, decompose)
+/workforce-cto                          # CTO — code review with scoring (also: rubberduck, adversarial, merge, experiment)
+/workforce-cfo                          # CFO — health metrics + cost (also: retro, budget)
+/workforce-cpo                          # CPO — backlog management (also: release)
+/workforce-cio                          # CIO — knowledge rules (also: eval, context)
+/workforce-cso                          # CSO — 14-phase security audit
+/workforce-cro                          # CRO — safety guardrails for destructive commands
+/workforce-cao                          # CAO — diagnose + recover failed tasks (also: forensics, cleanup)
+/workforce-cqo                          # CQO — E2E testing + test plans (also: gates)
+/workforce-cdo                          # CDO — design system consultation (also: shotgun)
+/workforce-cplo "add notifications"     # CPLO — full-stack implementation planning across all layers
 ```
 
 ## How it works
@@ -240,7 +236,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v3.0.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v3.1.0)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
@@ -286,46 +282,35 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 29 slash commands (7 new in v3.0.0)
+├── skills/                        # 29 slash commands (7 new in v3.1.0)
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-launch/          # Task creation flow
 │   ├── workforce-review/          # Diff review + weighted scoring
 │   ├── workforce-rules/           # Knowledge rule management
-│   ├── workforce-eval/            # Eval feedback loop
-│   ├── workforce-context/         # Session context management
-│   ├── workforce-backlog/         # Backlog management
-│   ├── workforce-health/          # Health + cost + eval metrics
-│   ├── workforce-decompose/       # Task decomposition + analyze-then-fix
-│   ├── workforce-rescue/          # Diagnose and recover failed tasks
-│   ├── workforce-chain/           # Sequential task chains
-│   ├── workforce-experiment/      # Iterative optimization
-│   ├── workforce-pipeline/        # Full pipeline with pre-scan
-│   ├── workforce-sprint/          # Batch launch from backlog
-│   ├── workforce-release/         # Release notes + changelog
-│   ├── workforce-qa/              # E2E test generation
-│   ├── workforce-merge/           # Conflict-aware merge
-│   ├── workforce-rubberduck/      # Prompt refinement
-│   ├── workforce-test-plan/       # Test plan generation
-│   ├── workforce-gate-status/     # Quality gate status
-│   ├── workforce-cleanup/         # Bulk cleanup
-│   ├── workforce-careful/         # Safety guardrails for destructive commands
-│   ├── workforce-cso/             # 14-phase security audit
-│   ├── workforce-adversarial/     # Cross-model adversarial review
-│   ├── workforce-retro/           # Engineering retrospective analytics
-│   ├── workforce-design/          # Design system consultation
-│   ├── workforce-design-shotgun/  # Rapid multi-direction design exploration
-│   ├── workforce-autoplan/        # Strict gate-driven end-to-end orchestrator
+│   ├── workforce-ceo/             # CEO — strict gated orchestrator + adaptive pipeline
+│   ├── workforce-coo/             # COO — launch, chain, sprint, decompose
+│   ├── workforce-cto/             # CTO — review, rubberduck, adversarial, merge, experiment
+│   ├── workforce-cfo/             # CFO — health, retro, budget
+│   ├── workforce-cpo/             # CPO — backlog, release
+│   ├── workforce-cio/             # CIO — rules, eval, context
+│   ├── workforce-cso/             # CSO — 14-phase security audit
+│   ├── workforce-cro/             # CRO — safety guardrails
+│   ├── workforce-cao/             # CAO — rescue, forensics, cleanup
+│   ├── workforce-cqo/             # CQO — qa, testplan, gates
+│   ├── workforce-cdo/             # CDO — design consultation, shotgun variants
+│   ├── workforce-cplo/            # CPLO — full-stack implementation planning
 │   └── workforce-version/         # Version info
-├── agents/                        # 9 agent definitions
-│   ├── task-planner.md            # Decomposes complex prompts into subtasks
-│   ├── backlog-analyst.md         # Prioritizes and stack-ranks backlog items
-│   ├── experiment-researcher.md   # Iterative code experiments
-│   ├── failure-forensics.md       # Deep failure investigation + competing hypotheses
-│   ├── release-manager.md         # Release preparation
-│   ├── qa-engineer.md             # E2E test writing with Playwright
-│   ├── requirements-analyst.md    # Deep-dive requirements + trust hierarchy + risk classification
-│   ├── knowledge-curator.md       # Eval → rule pipeline automation
-│   └── security-auditor.md        # 14-phase CSO security audit agent
+├── agents/                        # 10 agent definitions (C-suite)
+│   ├── coo-planner.md             # COO — decomposes complex tasks into subtasks
+│   ├── cpo-analyst.md             # CPO — prioritizes and stack-ranks backlog
+│   ├── cto-researcher.md          # CTO — iterative code experiments
+│   ├── cto-analyst.md             # CTO — deep-dive requirements analysis
+│   ├── cao-forensics.md           # CAO — deep failure investigation
+│   ├── cpo-release.md             # CPO — release preparation
+│   ├── cqo-engineer.md            # CQO — E2E test writing with Playwright
+│   ├── cio-curator.md             # CIO — eval → rule pipeline automation
+│   ├── cso-auditor.md             # CSO — security audit agent
+│   └── cplo-architect.md          # CPLO — full-stack planning architect
 ├── scripts/
 │   └── bump-version.js            # Version update utility
 └── hooks/
@@ -335,7 +320,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
     └── check-careful.sh           # PreToolUse hook — intercepts destructive commands
 ```
 
-## MCP tools reference (48 tools)
+## MCP tools reference (53 tools)
 
 ### Task management (13)
 
@@ -434,6 +419,16 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | `workforce_stop_experiment` | Stop a running experiment |
 | `workforce_list_experiments` | List all experiments |
 
+### Ops dashboard & routing (5)
+
+| Tool | Description |
+|------|-------------|
+| `workforce_ops_metrics` | Gate pass/fail rates, merge-block reasons, post-merge results, eval clusters, rule quality |
+| `workforce_route_task` | Capability router — recommend optimal skill path for a prompt based on intent/risk |
+| `workforce_eval_clusters` | Detect clusters of similar unprocessed evals, suggest preventive rules |
+| `workforce_rule_lint` | Quality checks on knowledge rules (wildcards, duplicates, short content) |
+| `workforce_loop_status` | Ralph Wiggum loop detection — stuck tasks, identical errors, no-progress alerts |
+
 ### Version (1)
 
 | Tool | Description |
@@ -444,11 +439,11 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 
 SQLite via Node.js built-in `node:sqlite` (DatabaseSync). Stored at the plugin's persistent data directory (`${CLAUDE_PLUGIN_DATA}/workforce.db`).
 
-### Schema (12 tables)
+### Schema (12 tables, 13 migrations)
 
 | Table | Purpose |
 |-------|---------|
-| **tasks** | Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, timestamps, taskType, dependsOn, taskGroup, phase) |
+| **tasks** | Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, timestamps, taskType, dependsOn, taskGroup, phase, loopDetected, lastErrorHash) |
 | **task_events** | Append-only lifecycle log (taskId, phase, detail, timestamp) |
 | **workers** | Active worker processes (taskId, pid, logPath) |
 | **launch_claims** | Atomic task claiming to prevent double-launch |
@@ -461,7 +456,7 @@ SQLite via Node.js built-in `node:sqlite` (DatabaseSync). Stored at the plugin's
 | **eval_logs** | Failure evaluations (taskId, category, whatHappened, rootCause, correctApproach, preventiveUpdate, severity) |
 | **session_context** | Cross-session persistent KV store (project, key, value) |
 
-Auto-migrates from legacy `~/.claude/tasks/claude-agents.db` on first run. 12 migrations applied incrementally.
+Auto-migrates from legacy `~/.claude/tasks/claude-agents.db` on first run. 13 migrations applied incrementally.
 
 ## Configuration
 

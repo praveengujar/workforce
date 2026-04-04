@@ -19,7 +19,7 @@ import { DATA_DIR } from './constants.js';
 const VALID_CATEGORIES = [
   'pattern_violation', 'infrastructure', 'prompt_quality',
   'scope_creep', 'rate_limit', 'environment', 'zero_work',
-  'merge_failure', 'dependency_failure', 'custom',
+  'merge_failure', 'dependency_failure', 'ralph_wiggum_loop', 'custom',
 ];
 
 const VALID_SEVERITIES = ['low', 'medium', 'high', 'critical'];
@@ -42,6 +42,7 @@ const CATEGORY_PATH_FALLBACKS = {
   zero_work: ['src/**', 'lib/**'],
   merge_failure: ['src/**'],
   dependency_failure: ['src/**'],
+  ralph_wiggum_loop: ['src/**', 'lib/**'],
   custom: ['src/**'],
 };
 

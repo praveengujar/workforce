@@ -54,8 +54,11 @@ If no action specified, run the full orchestration pipeline.
 2. Prepare approval recommendation — do NOT merge yet
 
 ### Stage 6: Human Decision (mandatory)
-1. Ask for explicit: `approve` or `reject` with reason
-2. Rejected → `workforce_reject_task`, stop
+1. **MUST use `AskUserQuestion` tool** — do NOT proceed without structured user input:
+   - Question: "Task {id}: Review score {pct}%, {qa_status}. Your decision?"
+   - Options: "APPROVE (merge to {branch})", "REJECT (discard changes)", "INSPECT (show full diff first)"
+2. If INSPECT → show diff, then AskUserQuestion again with APPROVE/REJECT
+3. Rejected → `workforce_reject_task`, stop
 
 ### Stage 7: Merge (approve path only)
 1. `workforce_approve_task`

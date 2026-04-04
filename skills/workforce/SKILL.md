@@ -8,6 +8,7 @@ When the user invokes /workforce, display a compact visual dashboard.
 ## Steps
 
 1. Call `workforce_list_tasks` to get all active tasks
+1b. Call `workforce_loop_status` to check for Ralph Wiggum loops
 2. Call `workforce_health_metrics` to get performance data
 3. Call `workforce_cost_summary` to get cost data
 
@@ -27,6 +28,11 @@ Reproduce this layout exactly, substituting real values for `{placeholders}`:
 
 ```
 ━━━ WORKFORCE DASHBOARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  {if loop_status has activeLoops:}
+  ⚠ RALPH WIGGUM ALERT ({count} tasks stuck)
+  ⚠ {id_8}  {loopType}  "{prompt_40}..."
+  {Use AskUserQuestion: "Task {id} stuck: {loopType}. Action?" with options: "Send hint", "Switch to analysis", "Kill and rewrite", "Continue"}
 
   RUNNING ({running_count}/{max_slots} slots)
   ● {id_8}  {elapsed}  {project}   "{prompt_40}..."
