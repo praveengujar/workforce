@@ -40,8 +40,12 @@ Error:    {error_200}
 
 DIAGNOSIS: {2-3 sentences}
 RECOVERY:  {action + improved prompt if applicable}
-➤ Retry, Archive, or Skip?
 ```
+
+After each diagnosis card, **MUST use `AskUserQuestion`**:
+- Question: "Task {id} ({category}): {error_summary}. Action?"
+- Options: "Retry with fix", "Archive (resolved)", "Skip (handle later)"
+- If loopDetected: add option "Analyze (switch to investigation mode)"
 
 Failure patterns:
 ```

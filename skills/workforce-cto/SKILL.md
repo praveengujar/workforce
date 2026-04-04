@@ -31,9 +31,11 @@ SCORE
   Security     3x  {s}/3   Rule comply   2x  {s}/3
   Test cover   2x  {s}/3   Scope         1x  {s}/3
   Total: {pct}%  → {APPROVE|CONDITIONAL|REJECT}
-
-➤ Approve or Reject?
 ```
+
+After presenting the score, **MUST use `AskUserQuestion`**:
+- Question: "Review score: {pct}%. Recommendation: {rec}. Your decision?"
+- Options: "Approve (merge)", "Reject (discard)", "Conditional (approve with notes)", "Show full diff"
 
 ### rubberduck
 Multi-perspective prompt analysis before launch. `/workforce-cto rubberduck "task prompt"`

@@ -41,7 +41,7 @@ import {
 import {
   healthMetricsHandler, costSummaryHandler,
   runRecoveryHandler, opsMetricsHandler, routeTaskHandler,
-  evalClustersHandler, ruleLintHandler,
+  evalClustersHandler, ruleLintHandler, loopStatusHandler,
 } from './tools/monitoring-tools.js';
 
 import {
@@ -89,7 +89,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '3.0.0';
+const WORKFORCE_VERSION = '3.1.0';
 
 const server = new McpServer({
   name: 'workforce',
@@ -457,6 +457,13 @@ server.tool(
   'Run quality checks on all knowledge rules. Detects global wildcards, near-duplicates, short content, and priority issues.',
   {},
   wrap(ruleLintHandler),
+);
+
+server.tool(
+  'workforce_loop_status',
+  'Check Ralph Wiggum loop detection status — shows tasks stuck in unproductive loops (same error repeated, no progress after 5+ min). Use to identify agents that need intervention.',
+  {},
+  wrap(loopStatusHandler),
 );
 
 // ---------------------------------------------------------------------------

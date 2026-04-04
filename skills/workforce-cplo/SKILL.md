@@ -183,7 +183,9 @@ Risk: {risk_level}
   Est. duration: {n} phases × ~{m} min avg = ~{total} min
   Est. cost: ~${total}
 
-➤ Execute as /workforce-coo chain, /workforce-coo sprint, or edit plan?
+After presenting the plan, **MUST use `AskUserQuestion`**:
+- Question: "Plan: {n} tasks across {layers} layers, ~${cost}. How to execute?"
+- Options: "Execute as chain (sequential)", "Execute as sprint (parallel phases)", "Edit plan first", "Cancel"
 ```
 
 ### Step 5: Execution Handoff

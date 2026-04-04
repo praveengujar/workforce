@@ -15,10 +15,13 @@ If no action specified, treat the argument as a launch prompt.
 Spawn a new autonomous task. `/workforce-coo "fix the login bug"` or `/workforce-coo launch "fix the login bug"`
 
 1. Call `workforce_analyze_prompt` to check admission, tier, cost
-2. Call `workforce_get_cost_policy` — reject if over cap, confirm if over threshold
-3. If not admitted: show rejection, offer to refine or decompose
-4. If dependencies specified: resolve and add `depends_on`
-5. Call `workforce_create_task` with prompt, project (cwd basename), autoMerge: false
+2. Call `workforce_get_cost_policy` — reject if over cap
+3. **If cost exceeds confirmation threshold**: **MUST use `AskUserQuestion`**:
+   - Question: "Estimated ~${cost} exceeds ${threshold} threshold. Proceed?"
+   - Options: "Launch anyway", "Reduce scope first", "Cancel"
+4. If not admitted: show rejection, offer to refine or decompose
+5. If dependencies specified: resolve and add `depends_on`
+6. Call `workforce_create_task` with prompt, project (cwd basename), autoMerge: false
 
 ```
 ┌─ LAUNCH ───────────────────────────────────────────┐

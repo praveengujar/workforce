@@ -224,3 +224,38 @@ export function evalClustersHandler({ min_cluster_size, similarity_threshold } =
 export function ruleLintHandler() {
   return lintRules();
 }
+
+// ---------------------------------------------------------------------------
+// loopStatusHandler — Ralph Wiggum loop detection status
+// ---------------------------------------------------------------------------
+export function loopStatusHandler() {
+  const allTasks = getAllTasks();
+  const loopTasks = allTasks.filter(t => t.loopDetected);
+  const running = allTasks.filter(t => t.status === 'running');
+  const stuckRunning = running.filter(t => {
+    if (!t.startedAt) return false;
+    return Date.now() - new Date(t.startedAt).getTime() > 5 * 60 * 1000;
+  });
+
+  return {
+    activeLoops: loopTasks.filter(t => t.status === 'running' || t.status === 'failed').map(t => ({
+      taskId: t.id,
+      status: t.status,
+      loopType: t.loopDetected,
+      error: t.error?.slice(0, 200),
+      retryCount: t.retryCount,
+      prompt: t.prompt?.slice(0, 100),
+    })),
+    longRunning: stuckRunning.map(t => ({
+      taskId: t.id,
+      runningMinutes: Math.round((Date.now() - new Date(t.startedAt).getTime()) / 60000),
+      prompt: t.prompt?.slice(0, 100),
+    })),
+    summary: {
+      totalDetected: loopTasks.length,
+      activeNow: loopTasks.filter(t => t.status === 'running').length,
+      failedWithLoop: loopTasks.filter(t => t.status === 'failed').length,
+      longRunningCount: stuckRunning.length,
+    },
+  };
+}

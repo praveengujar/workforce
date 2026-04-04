@@ -123,6 +123,91 @@ function rules4and5StaleOrRateLimit(task) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Rule 6: Ralph Wiggum loop — detect agents stuck repeating the same failure
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple hash for error comparison (first 200 chars, lowercased, whitespace-normalized).
+ */
+function errorHash(error) {
+  if (!error) return '';
+  return error.slice(0, 200).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Detect Ralph Wiggum loops: agent retrying with identical errors.
+ * Checks failed tasks that have retried 2+ times with matching error hashes.
+ */
+function rule6RalphWiggumLoop(task) {
+  if (task.status !== 'failed') return false;
+  if (task.loopDetected) return false; // already flagged
+  if ((task.retryCount ?? 0) < 2) return false;
+
+  const currentHash = errorHash(task.error);
+  if (!currentHash) return false;
+
+  // Compare to stored hash from previous failure
+  if (task.lastErrorHash && task.lastErrorHash === currentHash) {
+    updateTask(task.id, {
+      loopDetected: `same_error_${task.retryCount}x`,
+    });
+    logEvent(task.id, 'ralph_wiggum_detected', `Same error hash on ${task.retryCount} retries: ${task.error?.slice(0, 100)}`);
+    try {
+      createEval({
+        taskId: task.id,
+        category: 'ralph_wiggum_loop',
+        whatHappened: `Agent failed ${task.retryCount} times with identical error: ${task.error?.slice(0, 300)}`,
+        rootCause: 'Retry prompt did not address the root cause — same error reproduced.',
+        correctApproach: 'Rewrite the prompt with specific guidance addressing the error, or switch to analysis mode to investigate.',
+        detection: 'auto_recovery',
+        severity: 'high',
+      });
+    } catch { /* ignore eval creation errors */ }
+    return true;
+  }
+
+  // Store current hash for next retry comparison
+  updateTask(task.id, { lastErrorHash: currentHash });
+  return false;
+}
+
+/**
+ * Detect Ralph Wiggum loops on running tasks: agent running too long with no file changes.
+ * Called from recovery scan for tasks running >5 min with no git diff.
+ */
+function rule6bRalphWiggumStuck(task) {
+  if (task.status !== 'running') return false;
+  if (task.loopDetected) return false;
+  if (task.taskType === 'analysis') return false; // analysis tasks don't produce file changes
+
+  const startedAt = task.startedAt ? new Date(task.startedAt).getTime() : 0;
+  const runningMs = Date.now() - startedAt;
+  if (runningMs < 5 * 60 * 1000) return false; // <5 min, too early to judge
+
+  // Check if any files have changed in the worktree
+  if (!task.worktreePath) return false;
+  try {
+    const status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: task.worktreePath, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const realChanges = status.split('\n').filter(line => {
+      const t = line.trim();
+      return t && !t.endsWith('node_modules') && !t.endsWith('.env') && !t.endsWith('.env.local');
+    });
+    if (realChanges.length > 0) return false; // agent is making progress
+  } catch {
+    return false; // can't check, assume OK
+  }
+
+  // Running >5 min with no file changes
+  updateTask(task.id, {
+    loopDetected: `no_progress_${Math.round(runningMs / 60000)}m`,
+  });
+  logEvent(task.id, 'ralph_wiggum_detected', `Running ${Math.round(runningMs / 60000)}m with no file changes`);
+  return true;
+}
+
 export function runRecoveryScan() {
   const tasks = getAllTasks();
   const repairs = [];
@@ -136,6 +221,8 @@ export function runRecoveryScan() {
     if (rule1GhostRunner(task)) { repairs.push({ taskId: task.id, rule: '1', action: 'ghost_runner_failed' }); continue; }
     if (rules2and3BinaryOrHook(task)) { repairs.push({ taskId: task.id, rule: '2-3', action: 'escalation_no_retry' }); continue; }
     if (rules4and5StaleOrRateLimit(task)) { repairs.push({ taskId: task.id, rule: '4-5', action: 'auto_retry_or_exhausted' }); continue; }
+    if (rule6RalphWiggumLoop(task)) { repairs.push({ taskId: task.id, rule: '6a', action: 'ralph_wiggum_same_error' }); continue; }
+    if (rule6bRalphWiggumStuck(task)) { repairs.push({ taskId: task.id, rule: '6b', action: 'ralph_wiggum_no_progress' }); continue; }
   }
 
   if (repairs.length > 0) {

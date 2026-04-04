@@ -52,7 +52,9 @@ A. {concept} — {strengths} / {risk}
 B. {concept} — {strengths} / {risk}
 C. {concept} — {strengths} / {risk}
 
-➤ Choose (A/B/C), remix (A+B), refine (B), or new?
+After presenting variants, **MUST use `AskUserQuestion`**:
+- Question: "Which design direction?"
+- Options: "Choose A", "Choose B", "Choose C", "Remix/refine (describe in notes)"
 ```
 
 Max 3 iteration rounds. On approval: save, update session context, offer DESIGN.md update.
