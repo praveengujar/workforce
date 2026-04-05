@@ -35,6 +35,17 @@ Before writing tests, ensure the test infrastructure exists:
 
 ## Writing Tests
 
+### Pre-Test Reasoning (per test)
+
+Before writing each test, answer:
+
+- **USER STORY**: Who does what, and what do they expect? "As a {user}, I {action}, and I expect {outcome}"
+- **RISK WEIGHT**: If this behavior broke in production with no test, what's the impact?
+  - HIGH (data loss, auth bypass, payment error) → P0, write this test FIRST
+  - MEDIUM (wrong display, broken navigation) → P1
+  - LOW (cosmetic, non-blocking) → P2, only if time permits
+- **BOUNDARY**: What's the edge input most likely to break? (empty, max length, permission boundary, concurrent access)
+
 ### Principles
 - Test **user behavior**, not implementation details
 - Use **accessible selectors**: `getByRole`, `getByLabel`, `getByText` over CSS selectors
@@ -122,6 +133,17 @@ Files created:
 Remaining failures:
   - {test_name}: {failure_reason}
 ```
+
+## Post-Test Self-Review
+
+After all tests pass, verify:
+- Did you test the happy path for every new behavior?
+- Did you test at least one failure/error path?
+- Did you test the highest-risk boundary condition identified in pre-test reasoning?
+- Does each test fail when the feature is reverted? (check assertion specificity — `toBeVisible()` on a generic element doesn't prove anything)
+- Any timing-dependent assertions? (replace with `waitFor`)
+- Any assertions on dynamic data? (dates, IDs, random values — use matchers, not exact values)
+- Any shared state between tests? (should be none)
 
 ## Constraints
 

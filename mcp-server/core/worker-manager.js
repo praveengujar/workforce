@@ -485,15 +485,15 @@ async function spawnWorker(task) {
 Your job is to investigate and produce a structured findings report. Do NOT modify any files.
 Explore the codebase, trace execution paths, and identify all issues related to the task below.
 
-Structure your output as:
-FINDINGS:
-1. [Issue title] — [file:line] — [description of the problem]
-2. ...
+Phase 1 — SURVEY: Map all relevant files, functions, and data flows. Search 3+ naming patterns before concluding something doesn't exist.
+Phase 2 — DIAGNOSE: For each finding, distinguish root cause from symptom. Trace the issue to its origin.
+Phase 3 — PRIORITIZE: Rank findings by (impact × confidence). Only HIGH-confidence findings go into the fix specification.
+Phase 4 — SPECIFY: For each high-priority finding, write the exact change spec: file, function, what to change, what to verify.
 
-For each finding, explain:
-- What's wrong or missing
-- Which files/functions are involved
-- What the fix should be (describe it, don't implement it)
+Structure your output as:
+FINDINGS (ranked by confidence):
+1. [HIGH CONFIDENCE] [Issue title] — [file:line] — [description + root cause + specific fix]
+2. [MEDIUM CONFIDENCE] [Issue title] — [file:line] — [description + what needs further investigation]
 
 End with:
 Summary: [one-line summary of all findings]
@@ -501,6 +501,60 @@ Summary: [one-line summary of all findings]
 ---
 
 ${effectivePrompt}`;
+  }
+
+  // Layer 0: Sequential Thinking Protocol + Retry Reasoning
+  {
+    const taskType = task.taskType || 'standard';
+    let thinkingBlock = '';
+
+    // Retry reasoning — prevent Ralph Wiggum loops at the prompt level
+    const retryCount = task.retryCount ?? 0;
+    if (retryCount > 0 && task.error) {
+      thinkingBlock += `[RETRY — Attempt ${retryCount + 1}]
+Previous attempt failed: ${task.error.slice(0, 300)}
+
+Before repeating the same approach:
+1. What specifically went wrong last time?
+2. What will you do DIFFERENTLY this time?
+3. If the same error occurs again, what does that prove?
+
+Do NOT repeat the exact same approach that failed.
+
+`;
+    }
+
+    // Task-type-aware thinking framework
+    if (isAnalysis) {
+      thinkingBlock += `[THINKING PROTOCOL — Investigation]
+Before producing findings, follow this reasoning sequence:
+OBSERVE: What files, logs, and state are relevant? Search 3+ naming patterns before concluding something doesn't exist.
+HYPOTHESIZE: Generate at least 2 possible explanations for the issue.
+INVESTIGATE: For each hypothesis, find supporting AND contradicting evidence in the code.
+SYNTHESIZE: Rank findings by confidence (HIGH/MEDIUM/LOW). Only high-confidence findings become recommendations.
+`;
+    } else if (taskType === 'experiment' || taskType === 'measurement') {
+      thinkingBlock += `[THINKING PROTOCOL — Experiment]
+For each iteration, follow this reasoning sequence:
+BASELINE: What is the current metric value? Record it before changing anything.
+HYPOTHESIZE: "I believe {change} will improve {metric} because {mechanism}." If you cannot complete this sentence, stop and think harder.
+CHANGE: Make exactly ONE focused change. Never bundle unrelated changes.
+MEASURE: Run the measurement. Compare to baseline.
+DECIDE: Keep if improved, revert if not. State what you learned and what to try next.
+`;
+    } else {
+      thinkingBlock += `[THINKING PROTOCOL]
+Before writing any code, complete these reasoning steps:
+UNDERSTAND: Restate the task in your own words. What exactly must change and why?
+LOCATE: Find all relevant files. Search 3+ naming patterns (camelCase, snake_case, kebab-case) before concluding something doesn't exist.
+ANALYZE: What are the dependencies and call chains? What could break? What existing patterns should you follow?
+PLAN: List the specific changes you will make, in order. State what you will NOT change.
+EXECUTE: Make the changes.
+VERIFY: Re-read every file you modified. Do the changes satisfy the requirements? Did you introduce any regressions?
+`;
+    }
+
+    effectivePrompt = thinkingBlock + '\n' + effectivePrompt;
   }
 
   // Add context: open tasks on same project
@@ -669,6 +723,17 @@ ${effectivePrompt}`;
     } catch {
       // ignore session context errors
     }
+  }
+
+  // Completion Protocol — self-review checklist before finishing
+  if (!isAnalysis) {
+    effectivePrompt += `\n\n[COMPLETION CHECKLIST]
+Before finishing, verify your work:
+- Re-read every file you modified. Does each change directly serve the stated goal?
+- Check: did you introduce any hardcoded values, credentials, or TODO comments?
+- Check: do your changes work with the existing patterns (imports, naming, error handling)?
+- If a test command is available, run it.
+- Write a one-sentence summary of what you changed and why (this becomes the result summary).`;
   }
 
   // 3. Spawn Claude CLI

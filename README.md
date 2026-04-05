@@ -1,4 +1,4 @@
-# Workforce v3.1.0
+# Workforce v3.2.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 

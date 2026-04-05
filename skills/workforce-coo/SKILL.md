@@ -37,8 +37,11 @@ Create sequential dependent tasks. `/workforce-coo chain`
 
 1. Take a numbered list of task prompts from the user
 2. Validate each via `workforce_analyze_prompt`
-3. Generate group ID, assign phases, set `depends_on` to previous task
-4. Create all via `workforce_create_task`
+3. **Chain reasoning** — before creating dependencies:
+   - **Order validation**: For each pair of adjacent tasks: "If task N fails, can task N+1 still produce value?" If yes → they might not need to be chained (could run in parallel). If no → the dependency is correct.
+   - **Single point of failure**: Is there one task that, if it fails, blocks everything downstream? If so, is that task simple enough to have high confidence? If not, add an analysis task first.
+4. Generate group ID, assign phases, set `depends_on` to previous task
+5. Create all via `workforce_create_task`
 
 ```
 ━━━ CHAIN: {group} ({count} tasks) ━━━━━━━━━━━━━━━━━━
@@ -67,9 +70,13 @@ Total: ~${cost}
 ### decompose
 Break a complex prompt into subtasks. `/workforce-coo decompose "big refactor"`
 
-1. Analyze and break into subtasks completable in <10 min each
-2. Present decomposition table with tiers, costs, execution phases
-3. On approval: create all tasks with group, phase, depends_on
+1. **Decomposition reasoning** — before generating subtasks:
+   - **Is decomposition even needed?** If the change touches <5 files and has no cross-layer deps, launch directly. Decomposing a simple task into 2 subtasks adds coordination cost for no benefit.
+   - **Boundary selection**: Where do you cut? By layer (backend/frontend — good for full-stack), by behavior (each user story — good for independent features), or by phase (analyze → implement → test — good for unknowns). Pick ONE strategy and state why.
+   - **Isolation test** (per subtask): Can this subtask compile and pass tests in its worktree WITHOUT the others? If not, it needs a dependency or it's split wrong.
+2. Break into subtasks completable in <10 min each
+3. Present decomposition table with tiers, costs, execution phases
+4. On approval: create all tasks with group, phase, depends_on
 
 Supports **analyze-then-fix pattern** when the task involves debugging or finding what's missing:
 - Phase 1: analysis task (`task_type: "analysis"`) investigates

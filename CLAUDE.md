@@ -1,4 +1,4 @@
-# Workforce v3.1.0
+# Workforce v3.2.0
 
 Claude Code plugin for managing autonomous agent sessions with self-improving context management.
 
@@ -48,10 +48,11 @@ Phases: `pending → running → review → merging → done/failed`
 - **analysis** — Investigation-only. Skips zero-work guard, output injected into downstream fix tasks.
 - **experiment** / **measurement** — Iterative optimization tasks.
 
-## Context injection (8 layers)
+## Context injection (10 layers)
 
 Every spawned agent receives enriched prompts with trust-annotated context:
 
+0. **Sequential Thinking Protocol** — task-type-aware reasoning framework (standard: UNDERSTAND→LOCATE→ANALYZE→PLAN→EXECUTE→VERIFY; analysis: OBSERVE→HYPOTHESIZE→INVESTIGATE→SYNTHESIZE; experiment: BASELINE→HYPOTHESIZE→CHANGE→MEASURE→DECIDE). Retry reasoning injected on retries (prevents Ralph Wiggum loops at the prompt level).
 1. Analysis task prefix — investigation instructions (analysis tasks only)
 2. Running tasks on same project
 3. Recent git log (5 commits) — Trust: HIGH
@@ -60,6 +61,7 @@ Every spawned agent receives enriched prompts with trust-annotated context:
 6. Upstream task results + shared context (dependency injection)
 7. Knowledge rules (path/keyword-matched, priority-sorted, 3000 char cap) — Trust: MEDIUM
 8. Session context (active_focus first, recency-ordered, 1500 char cap) — Trust: LOW
+9. **Completion Checklist** — self-review protocol before finishing (standard tasks only): verify changes serve the goal, check for hardcoded values/credentials, run tests if available, write result summary.
 
 ## Knowledge rules
 
