@@ -16,7 +16,11 @@ Diagnose and recover failed tasks. `/workforce-cao` or `/workforce-cao rescue`
 
 1. `workforce_list_tasks` with `status_filter: "failed"` (max 5, most recent first)
 2. For each: `workforce_task_events` + `workforce_task_output`
-3. Classify root cause:
+3. **Failure reasoning** — before classifying by pattern:
+   - **Read the output first**: Don't classify by error string alone. Read `workforce_task_output` (last 200 lines). What was the agent TRYING to do when it failed? Did it make partial progress? (files modified but not committed = different diagnosis from no progress at all)
+   - **Systemic check**: Is this failure unique, or part of a pattern? Did other tasks fail with similar errors in the last hour? Is this the same task retried N times? If systemic → the fix is a rule/environment change, not a prompt rewrite.
+   - **Retry value**: Will retrying actually help? Same error 2+ times → NO, rewrite prompt or fix environment. Transient error → YES, with backoff. Zero-work → NO on same prompt, need specific file paths and function names.
+4. Classify root cause:
 
 | Category | Pattern | Recovery |
 |----------|---------|----------|

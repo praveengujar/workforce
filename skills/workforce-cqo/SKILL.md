@@ -43,8 +43,12 @@ Task: {id_8}  Strategy: {approach}
 Generate test strategy before or during review. `/workforce-cqo testplan <task_id>`
 
 1. Analyze task diff or prompt for testable behaviors
-2. Classify: P0 (must test), P1 (should test), P2 (nice to have)
-3. Identify edge cases
+2. **Test strategy reasoning** — before classifying:
+   - **What can break**: Trace the change surface — what code paths does this diff affect? For each affected path, what user-visible behavior depends on it?
+   - **Regression risk map**: Which existing behaviors AREN'T being changed but COULD break as a side effect? These are highest-priority regression tests.
+   - **Test type decision**: For each behavior, what's the cheapest test that proves it works? Unit (fast) → Integration (boundary-crossing) → E2E (user workflow). Don't E2E-test what a unit test can verify.
+3. Classify: P0 (must test), P1 (should test), P2 (nice to have)
+4. Identify edge cases
 
 ```
 ━━━ CQO TEST PLAN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -16,7 +16,43 @@ Review completed task diffs with weighted scoring. `/workforce-cto` or `/workfor
 
 1. `workforce_list_tasks` filtered for status=review
 2. For each: `workforce_get_diff`, present file summary table
-3. Score 6 categories (Correctness 3x, Security 3x, Test coverage 2x, Code quality 2x, Rule compliance 2x, Scope 1x)
+3. Score 6 categories with **per-dimension reasoning** — for each dimension, write your reasoning and cite evidence BEFORE assigning a score:
+
+**Per-dimension reasoning template:**
+```
+CORRECTNESS (3x):
+  Think: Does this actually solve the stated problem? Trace the execution path from input to output.
+  Evidence: [cite specific lines/functions from the diff]
+  Score: X/3
+
+SECURITY (3x):
+  Think: What attack surface does this change create or modify? Check for injection, auth bypass, data exposure.
+  Evidence: [cite lines or "no security-relevant changes"]
+  Score: X/3
+
+TEST COVERAGE (2x):
+  Think: Are the new behaviors covered? Would tests catch a regression if this code is modified later?
+  Evidence: [cite test files or note absence]
+  Score: X/3
+
+CODE QUALITY (2x):
+  Think: Does this follow existing patterns? Is it readable without comments? Any code smells?
+  Evidence: [cite patterns matched or violated]
+  Score: X/3
+
+RULE COMPLIANCE (2x):
+  Think: Check workforce_get_rules_for_path — does the change follow applicable rules?
+  Evidence: [cite rules checked and compliance status]
+  Score: X/3
+
+SCOPE (1x):
+  Think: Does the diff contain ONLY changes needed for the task? Any scope creep, unrelated refactors, or unnecessary additions?
+  Evidence: [cite any out-of-scope changes]
+  Score: X/3
+```
+
+Only AFTER completing all per-dimension reasoning, compute the weighted total.
+
 4. Check `workforce_get_rules_for_path` for compliance
 5. Thresholds: >=65% APPROVE, 50-64% CONDITIONAL, <50% REJECT. Security=0 → auto-REJECT
 6. Flag: new deps, deleted tests, hardcoded secrets, auth changes

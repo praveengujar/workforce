@@ -27,12 +27,21 @@ If no action specified, run the full orchestration pipeline.
 1. Call `workforce_analyze_prompt`
 2. Extract file paths, call `workforce_dependency_graph` build
 3. If paths exist: `workforce_get_rules_for_path` + `workforce_dependency_graph` query_impact
-4. Produce: risk level, impacted files, applicable rules, go/no-go
+4. **Risk reasoning** — before producing go/no-go:
+   - What is the worst thing that could happen if this task fails?
+   - Is the blast radius contained to the worktree, or could it affect shared state (DB, config, deps)?
+   - Are there concurrent tasks working on related files?
+   - Decision: proceed / flag risk / stop
+5. Produce: risk level, impacted files, applicable rules, go/no-go
 
 ### Stage 1: Rubberduck (mandatory)
-1. Refine prompt into execution spec with acceptance criteria, non-goals, risk notes
-2. If ambiguous, stop and ask for clarification
-3. Save refined prompt as gate evidence
+1. **Ambiguity detection** — before refining, identify:
+   - What assumptions are you making that the user didn't explicitly state?
+   - What could "done" mean from two different perspectives?
+   - List 2 ways this task could be misinterpreted by an autonomous agent
+2. Refine prompt into execution spec that eliminates those ambiguities, with acceptance criteria, non-goals, risk notes
+3. If ambiguous after analysis, stop and ask for clarification
+4. Save refined prompt as gate evidence
 
 ### Stage 2: Test Plan (mandatory)
 1. Build P0/P1/P2 test plan before coding
@@ -51,7 +60,11 @@ If no action specified, run the full orchestration pipeline.
 
 ### Stage 5: Review (mandatory)
 1. `workforce_get_diff`, summarize changes, risk highlights, QA outcome
-2. Prepare approval recommendation — do NOT merge yet
+2. **Pre-decision reasoning** — before presenting the recommendation:
+   - What is the strongest argument FOR merging this change?
+   - What is the strongest argument AGAINST merging?
+   - If you had to bet your own code on this, would you merge? Why or why not?
+3. Present both arguments to the user with the recommendation — do NOT merge yet
 
 ### Stage 6: Human Decision (mandatory)
 1. **MUST use `AskUserQuestion` tool** — do NOT proceed without structured user input:

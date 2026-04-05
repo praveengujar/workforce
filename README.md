@@ -1,4 +1,4 @@
-# Workforce v3.1.0
+# Workforce v3.2.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 
@@ -21,6 +21,7 @@ Workforce lets you run multiple Claude Code agents in parallel, each working on 
 - **Engineering retros**: Task performance analytics, failure pattern analysis, velocity metrics, and cost efficiency trends
 - **Multi-perspective planning**: CEO strategy, design UX, and engineering architecture reviews before launching complex tasks
 - **Full-stack planning**: Chief Planning Officer auto-detects 13 stack layers, maps cross-layer impact, generates phased implementation plans
+- **Sequential thinking**: Every agent gets a task-type-aware reasoning protocol — structured thinking before acting, with retry reasoning and self-review checklists
 - **Loop detection**: Ralph Wiggum detector catches agents stuck repeating the same failure or spinning with no progress
 - **Structured human gates**: AskUserQuestion at 7 critical decision points prevents LLM auto-deciding on merges, costs, and reviews
 
@@ -96,18 +97,19 @@ pending → running → review → merging → done
 ```
 
 1. **Create**: You describe a task. Workforce creates a git worktree on a new branch (`wf/{task-id}`). Project defaults to cwd basename if not specified.
-2. **Run**: Claude CLI runs in a tmux session (or child process) with your prompt, plus 8 layers of injected context (knowledge rules, session context, git history, project memory, feedback, upstream results).
+2. **Run**: Claude CLI runs in a tmux session (or child process) with your prompt, plus 10 layers of injected context (thinking protocol, knowledge rules, session context, git history, project memory, feedback, upstream results, completion checklist).
 3. **Review**: When the agent finishes and files changed, the task enters review. You see the diff with weighted scoring and approve or reject.
 4. **Merge**: On approval, changes merge to the target branch with a per-repo lock to prevent conflicts between concurrent tasks.
 5. **Cleanup**: Worktree and branch are removed. Task auto-archives after 5 minutes.
 
-### Context injection (8 layers)
+### Context injection (10 layers)
 
-Every spawned agent receives a prompt enriched with up to 8 context layers:
+Every spawned agent receives a prompt enriched with up to 10 context layers:
 
 | Layer | Source | Trust | Budget |
 |-------|--------|-------|--------|
-| Analysis prefix | Investigation instructions for analysis tasks | — | Unbounded |
+| **Thinking protocol** | Task-type-aware reasoning framework + retry reasoning | — | ~200 tokens |
+| Analysis prefix | Investigation instructions with confidence-ranked output (analysis tasks) | — | Unbounded |
 | Running tasks | Other active tasks on same project | — | Unbounded |
 | Git log | Last 5 commits | HIGH | Unbounded |
 | Project memory | `.claude/project-memory.md` (tail) | LOW | 2000 chars |
@@ -115,6 +117,7 @@ Every spawned agent receives a prompt enriched with up to 8 context layers:
 | Upstream results | Dependency task outputs + shared context | — | 3000 chars |
 | Knowledge rules | Path-matched or keyword-matched, priority-sorted | MEDIUM | 3000 chars |
 | Session context | Active focus first, then recency-ordered entries | LOW | 1500 chars |
+| **Completion checklist** | Self-review protocol (standard tasks only) | — | ~100 tokens |
 
 ### Task types
 
@@ -123,6 +126,46 @@ Every spawned agent receives a prompt enriched with up to 8 context layers:
 | `standard` | Active — fails if no changes | Code changes | Default for all tasks |
 | `analysis` | Skipped — succeeds on output | Findings report | Investigation, debugging, cross-cutting analysis |
 | `experiment` | N/A | Iterative results | Optimization, parameter tuning |
+
+### Sequential thinking protocols
+
+Every spawned agent receives a structured reasoning framework injected before its task prompt. The protocol varies by task type:
+
+| Task Type | Protocol | Steps |
+|-----------|----------|-------|
+| `standard` | Code execution | UNDERSTAND → LOCATE → ANALYZE → PLAN → EXECUTE → VERIFY |
+| `analysis` | Investigation | OBSERVE → HYPOTHESIZE → INVESTIGATE → SYNTHESIZE |
+| `experiment` | Optimization | BASELINE → HYPOTHESIZE → CHANGE → MEASURE → DECIDE |
+
+**Retry reasoning**: When a task retries after failure, the previous error is injected with three forcing questions (what went wrong, what to do differently, what another failure would prove). This prevents agents from repeating the same mistake — catching Ralph Wiggum loops at the prompt level before the recovery engine needs to intervene.
+
+**Completion checklist**: Standard tasks get a self-review protocol appended: re-read modified files, check for hardcoded values/credentials, verify existing patterns are followed, run tests if available.
+
+**Agent-specific reasoning scaffolds**: Beyond the universal protocol, individual agents have domain-specific thinking requirements:
+
+| Agent | Reasoning Added |
+|-------|----------------|
+| CPLO architect | Pre-planning deliberation (change type, assumption inventory, alternative decompositions), per-phase dependency validation, plan self-review with pre-mortem |
+| CSO auditor | Threat model construction (attacker profile, crown jewels, trust boundaries), finding validation with exploitability tracing |
+| CQO engineer | Pre-test reasoning (user story, risk weight, boundary conditions), post-test self-review |
+| CIO curator | Causal chain validation, specificity/counter-example tests before rule creation |
+| CPO analyst | Per-item impact/urgency/effort reasoning before scoring |
+| CTO researcher | Per-iteration hypothesis → result interpretation loop |
+
+**Skill-level reasoning**: C-suite skills enforce structured thinking at key decision points:
+
+| Skill | Decision Point | Reasoning |
+|-------|---------------|-----------|
+| CEO | Stage 0 (Pre-scan) | Blast radius and concurrent task risk assessment |
+| CEO | Stage 1 (Rubberduck) | Ambiguity detection — 2 misinterpretation scenarios |
+| CEO | Stage 5 (Review) | Arguments for AND against merging |
+| CTO | Review scoring | Per-dimension evidence before each of 6 score categories |
+| COO | Decompose | Boundary selection strategy, per-subtask isolation test |
+| COO | Chain | Order validation, single point of failure analysis |
+| CDO | Consult | Audience analysis, competitive differentiation, constraint reasoning |
+| CDO | Shotgun | Diversity axes, per-variant rationale |
+| CQO | Test plan | Regression risk mapping, test type decision per behavior |
+| CAO | Rescue | Output-first diagnosis, systemic check, retry value reasoning |
 
 ### Analyze-then-fix
 
@@ -210,7 +253,7 @@ Thresholds: >=65% recommend approve, <50% recommend reject. Security score of 0 
 
 ### Recovery engine
 
-Runs every 30 seconds, detecting and auto-repairing 6 failure patterns. Each detection also creates an eval entry for the feedback loop.
+Runs every 30 seconds, detecting and auto-repairing 8 failure patterns. Each detection also creates an eval entry for the feedback loop.
 
 | Rule | Pattern | Action |
 |------|---------|--------|
@@ -220,6 +263,8 @@ Runs every 30 seconds, detecting and auto-repairing 6 failure patterns. Each det
 | 1 | Ghost runner — PID no longer alive | Mark failed + create eval |
 | 2-3 | Binary missing / hook blocked | Escalate, no retry |
 | 4-5 | Stale session / rate limit | Auto-retry with 60s backoff + create eval |
+| 6a | Ralph Wiggum — same error hash on 2+ retries | Flag loop, create eval, stop retrying |
+| 6b | Ralph Wiggum — running >5 min with no file changes | Flag no-progress loop |
 
 ### Cost model
 
@@ -236,17 +281,17 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v3.1.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v3.2.0)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
 ├── mcp-server/
-│   ├── index.js                   # Entry point — registers 48 MCP tools
+│   ├── index.js                   # Entry point — registers 53 MCP tools
 │   ├── package.json               # Dependencies (@modelcontextprotocol/sdk)
 │   ├── core/
-│   │   ├── db.js                  # SQLite database (12 migrations, 12 tables)
-│   │   ├── worker-manager.js      # Spawn workers, 8-layer context injection, merge, cleanup
-│   │   ├── recovery-engine.js     # 6-rule self-healing scan + eval creation
+│   │   ├── db.js                  # SQLite database (13 migrations, 12 tables)
+│   │   ├── worker-manager.js      # Spawn workers, 10-layer context injection (incl. thinking protocol), merge, cleanup
+│   │   ├── recovery-engine.js     # 8-rule self-healing scan + Ralph Wiggum loop detection + eval creation
 │   │   ├── knowledge-rules.js     # Path-scoped rule engine with glob matching + keyword matching
 │   │   ├── eval-engine.js         # Self-improving feedback loop (three-output model)
 │   │   ├── session-context.js     # Cross-session persistent KV store
@@ -282,7 +327,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 29 slash commands (7 new in v3.1.0)
+├── skills/                        # 14 C-suite officer skills
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-launch/          # Task creation flow
 │   ├── workforce-review/          # Diff review + weighted scoring

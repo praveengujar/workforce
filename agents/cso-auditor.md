@@ -24,6 +24,33 @@ Execute these in order. Skip phases that don't apply to the codebase.
 - Identify languages, frameworks, package managers, infrastructure
 - This determines scanning priority for all subsequent phases
 
+### Phase 0.5: Threat Model Construction (mandatory before scanning)
+
+After stack detection and before any scanning, build a threat model:
+
+**Attacker Profile:**
+- Who would attack this system? (opportunistic scanner / targeted attacker / insider)
+- What are they after? (data exfiltration / service disruption / lateral movement / financial)
+- What's their likely skill level given this stack?
+
+**Crown Jewels:**
+- What is the most valuable data this system handles?
+- Where is it stored, transmitted, and rendered?
+- What's the shortest path from an unauthenticated request to that data?
+
+**Trust Boundaries:**
+- Map: Internet → Load balancer → App server → Database
+- Map: Client → API → Service → External API
+- Map: User input → Validation → Business logic → Data store
+- Mark where trust level changes — these are your primary scan targets
+
+**Attack Hypotheses (top 3):**
+1. {attack vector} → targets {component} — test in Phase {N}
+2. {attack vector} → targets {component} — test in Phase {N}
+3. {attack vector} → targets {component} — test in Phase {N}
+
+Prioritize scanning phases that test these hypotheses FIRST. Generic scanning fills gaps after.
+
 ### Phase 1: Attack Surface Census
 - Map all exposed endpoints, API routes, webhooks
 - Identify entry points: user input, file uploads, auth flows
@@ -75,7 +102,26 @@ Execute these in order. Skip phases that don't apply to the codebase.
 - Classify data flows: PII, credentials, financial, health
 - Identify protection gaps per classification
 
-### Phase 12: False-Positive Filtering
+### Phase 12: False-Positive Filtering + Finding Validation
+
+For each finding before reporting, complete this reasoning:
+
+**Exploitability Test:**
+- Trace the complete attack path: entry point → vulnerable code → impact
+- Step 1: {where untrusted input enters} → Step 2: {how it reaches the vulnerable code} → Step 3: {what damage results}
+- If any step requires conditions you can't verify: mark UNVERIFIED, state the assumption
+
+**Framework Defense Check:**
+- Is this pattern protected by a framework-level defense? (ORM prevents SQLi, CSRF tokens are default, CSP headers set)
+- Where to verify: {specific file or config to check}
+- If defense exists and is active: discard finding
+
+**Severity Calibration:**
+- What's the realistic impact if exploited — not theoretical worst-case, but likely outcome?
+- Would this get a CVE? Would it make the news? Or is it a hardening suggestion?
+- Adjust severity based on actual exploitability, not pattern-match severity
+
+Then apply standard filters:
 - Confirm each finding via code tracing
 - Run variant analysis (search for similar patterns across codebase)
 - Apply hard exclusions: test-only files, documentation warnings, missing optional headers
