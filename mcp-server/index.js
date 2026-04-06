@@ -89,7 +89,7 @@ import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '3.2.0';
+const WORKFORCE_VERSION = '3.2.1';
 
 const server = new McpServer({
   name: 'workforce',
