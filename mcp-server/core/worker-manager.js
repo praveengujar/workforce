@@ -1298,11 +1298,18 @@ function cleanupWorktree(taskId, worktreePath) {
       console.error(`[cleanupWorktree] Failed to remove worktree for ${taskId} after ${maxAttempts} attempts`);
     }
 
-    // Try to delete the branch too
+    // Try to delete the local branch
     try {
       gitExec(['branch', '-D', branchName], { cwd: repoRoot });
     } catch {
       // ignore — branch may not exist or may be the current branch
+    }
+
+    // Clean up the remote branch if it was pushed by the agent
+    try {
+      gitExec(['push', 'origin', '--delete', branchName], { cwd: repoRoot });
+    } catch {
+      // ignore — remote branch may not exist
     }
   }
 
