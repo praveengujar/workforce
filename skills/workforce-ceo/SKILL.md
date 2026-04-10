@@ -3,7 +3,7 @@ name: workforce-ceo
 description: "Chief Executive Officer — strict gate-driven orchestrator: pre-scan, rubberduck, test plan, code, QA, review, human decision, merge. Never auto-merges. Default: plan."
 ---
 
-When the user invokes /workforce-ceo, run the strict gated orchestrator. This is the same as the former /workforce-autoplan.
+When the user invokes /workforce-ceo, run the strict gated orchestrator.
 
 ## Default Action: plan
 
@@ -12,7 +12,7 @@ If no action specified, run the full orchestration pipeline.
 ## Actions
 
 - **plan** (default) — Full gated orchestration (pre-scan → rubberduck → test plan → code → QA → review → human gate → merge)
-- **pipeline** — Adaptive pipeline that skips stages for simple tasks (former /workforce-pipeline)
+- **pipeline** — Adaptive pipeline that skips stages for simple tasks
 
 ## Contract (plan mode)
 

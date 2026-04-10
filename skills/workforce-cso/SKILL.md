@@ -45,7 +45,7 @@ SUMMARY
 
 ## Pipeline Integration
 
-When invoked from `/workforce-pipeline` or `/workforce-review`:
+When invoked from `/workforce-ceo pipeline` or `/workforce-cto review`:
 - CRITICAL finding → override Security score to 0 → auto-REJECT
 - HIGH findings → cap Security score at 1/3
 - Clean audit → proceed with security note
@@ -59,5 +59,5 @@ Offer to:
 ## Related
 
 - **security-auditor agent**: Same 14-phase methodology, runs autonomously — use for deep dives
-- `/workforce-adversarial`: Complements CSO — code-level logic bugs vs infrastructure/supply-chain security
-- `/workforce-review`: Findings feed into the Security category of weighted scoring
+- `/workforce-cto adversarial`: Complements CSO — code-level logic bugs vs infrastructure/supply-chain security
+- `/workforce-cto review`: Findings feed into the Security category of weighted scoring

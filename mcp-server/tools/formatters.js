@@ -170,7 +170,7 @@ export function formatHealthMetrics(metrics, costSummary) {
     lines.push(`  Total: ${es.total}  |  Unprocessed: ${es.unprocessed}`);
     const topCats = Object.entries(es.byCategory).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ');
     if (topCats) lines.push(`  Top categories: ${topCats}`);
-    if (es.unprocessed > 0) lines.push(`  \u2192 Run /workforce-eval to review and process`);
+    if (es.unprocessed > 0) lines.push(`  \u2192 Run /workforce-cio eval to review and process`);
   }
 
   // Cost / usage section

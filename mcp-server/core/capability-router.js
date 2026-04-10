@@ -52,44 +52,44 @@ export function routeTask({ prompt, tier, filePaths = [] }) {
     filePaths.some(p => /\.(tsx|jsx|css|scss|svelte|vue)$/.test(p));
   if (hasUI) flags.push('has-ui');
 
-  // Route decision tree
+  // Route decision tree (v3 C-suite naming)
   let skill, reason;
 
   if (intents.has('investigation')) {
-    skill = '/workforce-decompose';
+    skill = '/workforce-coo decompose';
     reason = 'Investigation detected — decompose into analysis + fix tasks';
-    alternatives.push('/workforce-launch with task_type: analysis');
+    alternatives.push('/workforce-coo launch (with task_type: analysis)');
   } else if (tier === 'complex' || (isSensitive && tier !== 'simple')) {
-    skill = '/workforce-autoplan';
+    skill = '/workforce-ceo';
     reason = `${tier === 'complex' ? 'Complex task' : 'Security-sensitive change'} — strict gated orchestration`;
-    alternatives.push('/workforce-pipeline', '/workforce-rubberduck');
+    alternatives.push('/workforce-ceo pipeline', '/workforce-cto rubberduck');
   } else if (hasUI && !intents.has('test')) {
     if (intents.has('design')) {
-      skill = '/workforce-design';
+      skill = '/workforce-cdo consult';
       reason = 'Design work detected — establish design system first';
-      alternatives.push('/workforce-design-shotgun');
+      alternatives.push('/workforce-cdo shotgun');
     } else {
-      skill = '/workforce-pipeline';
+      skill = '/workforce-ceo pipeline';
       reason = 'UI change — adaptive pipeline includes test plan + QA';
-      alternatives.push('/workforce-autoplan');
+      alternatives.push('/workforce-ceo');
     }
   } else if (intents.has('security')) {
     skill = '/workforce-cso';
     reason = 'Security concern — run CSO audit';
-    alternatives.push('/workforce-adversarial', '/workforce-pipeline');
+    alternatives.push('/workforce-cto adversarial', '/workforce-ceo pipeline');
   } else if (intents.has('test')) {
-    skill = '/workforce-qa';
+    skill = '/workforce-cqo qa';
     reason = 'Testing intent — generate E2E tests';
-    alternatives.push('/workforce-test-plan');
+    alternatives.push('/workforce-cqo testplan');
   } else if (tier === 'medium') {
-    skill = '/workforce-rubberduck';
+    skill = '/workforce-cto rubberduck';
     reason = 'Medium complexity — refine prompt before launch';
-    alternatives.push('/workforce-pipeline', '/workforce-launch');
+    alternatives.push('/workforce-ceo pipeline', '/workforce-coo launch');
   } else {
     // Simple task
-    skill = '/workforce-launch';
+    skill = '/workforce-coo launch';
     reason = 'Simple task — direct launch';
-    alternatives.push('/workforce-rubberduck');
+    alternatives.push('/workforce-cto rubberduck');
   }
 
   return { skill, reason, alternatives, flags, detectedIntents: [...intents] };
