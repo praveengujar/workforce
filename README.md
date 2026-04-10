@@ -174,7 +174,7 @@ For complex bugs where agents struggle (missing symmetric logic, cache/state iss
 1. **Phase 1**: Analysis task (`task_type: "analysis"`) investigates and produces structured findings
 2. **Phase 2+**: Targeted fix tasks depend on the analysis, each addressing one specific finding
 
-The analysis task's full output is automatically injected into downstream fix tasks via the dependency chain. Use `/workforce-decompose` to set this up.
+The analysis task's full output is automatically injected into downstream fix tasks via the dependency chain. Use `/workforce-coo decompose` to set this up.
 
 ## AI context memory
 
@@ -183,7 +183,7 @@ The analysis task's full output is automatically injected into downstream fix ta
 Encode team standards, architectural patterns, and institutional knowledge as path-scoped rules that get auto-injected into agent prompts.
 
 ```
-/workforce-rules                    # Create, list, query by path, delete
+/workforce-cio rules                # Create, list, query by path, delete
 ```
 
 Seed baseline reusable-library rules:
@@ -210,7 +210,7 @@ The system learns from every failure:
 4. **Curation**: The knowledge-curator agent batch-processes evals into clustered rules
 
 ```
-/workforce-eval                     # Review and process failure evals
+/workforce-cio eval                 # Review and process failure evals
 @knowledge-curator                  # Auto-curate evals into rules
 ```
 
@@ -219,7 +219,7 @@ The system learns from every failure:
 Persistent key-value context per project that survives across sessions:
 
 ```
-/workforce-context                  # View, set focus, add notes, clear
+/workforce-cio context              # View, set focus, add notes, clear
 ```
 
 - `active_focus` gets top-priority injection (always first in context block)
@@ -229,7 +229,7 @@ Persistent key-value context per project that survives across sessions:
 
 ### Pipeline pre-scan
 
-`/workforce-pipeline` runs a pre-scan before launching expensive agents:
+`/workforce-ceo pipeline` runs a pre-scan before launching expensive agents:
 1. Builds dependency graph from imports
 2. Checks impact radius of affected files
 3. Matches applicable knowledge rules
@@ -238,7 +238,7 @@ Persistent key-value context per project that survives across sessions:
 
 ### Review scoring
 
-`/workforce-review` produces a weighted score:
+`/workforce-cto review` produces a weighted score:
 
 | Category | Weight |
 |----------|--------|
@@ -281,7 +281,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v3.2.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v3.2.1)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
@@ -329,21 +329,18 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
 ├── skills/                        # 14 C-suite officer skills
 │   ├── workforce/                 # Dashboard view
-│   ├── workforce-launch/          # Task creation flow
-│   ├── workforce-review/          # Diff review + weighted scoring
-│   ├── workforce-rules/           # Knowledge rule management
-│   ├── workforce-ceo/             # CEO — strict gated orchestrator + adaptive pipeline
-│   ├── workforce-coo/             # COO — launch, chain, sprint, decompose
-│   ├── workforce-cto/             # CTO — review, rubberduck, adversarial, merge, experiment
-│   ├── workforce-cfo/             # CFO — health, retro, budget
-│   ├── workforce-cpo/             # CPO — backlog, release
-│   ├── workforce-cio/             # CIO — rules, eval, context
-│   ├── workforce-cso/             # CSO — 14-phase security audit
-│   ├── workforce-cro/             # CRO — safety guardrails
 │   ├── workforce-cao/             # CAO — rescue, forensics, cleanup
-│   ├── workforce-cqo/             # CQO — qa, testplan, gates
 │   ├── workforce-cdo/             # CDO — design consultation, shotgun variants
+│   ├── workforce-ceo/             # CEO — strict gated orchestrator + adaptive pipeline
+│   ├── workforce-cfo/             # CFO — health, retro, budget
+│   ├── workforce-cio/             # CIO — rules, eval, context
+│   ├── workforce-coo/             # COO — launch, chain, sprint, decompose
 │   ├── workforce-cplo/            # CPLO — full-stack implementation planning
+│   ├── workforce-cpo/             # CPO — backlog, release
+│   ├── workforce-cqo/             # CQO — qa, testplan, gates
+│   ├── workforce-cro/             # CRO — safety guardrails
+│   ├── workforce-cso/             # CSO — 14-phase security audit
+│   ├── workforce-cto/             # CTO — review, rubberduck, adversarial, merge, experiment
 │   └── workforce-version/         # Version info
 ├── agents/                        # 10 agent definitions (C-suite)
 │   ├── coo-planner.md             # COO — decomposes complex tasks into subtasks
