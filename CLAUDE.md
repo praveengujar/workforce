@@ -1,4 +1,4 @@
-# Workforce v3.2.1
+# Workforce v3.3.0
 
 Claude Code plugin for managing autonomous agent sessions with self-improving context management.
 
@@ -11,8 +11,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 ## Stack
 
 - **MCP server** (stdio) — 53 tools for task lifecycle, backlog, monitoring, context management, ops dashboard, loop detection
-- **Skills** — 14 C-suite officer skills (see Skill Routing below)
-- **Agents** — 10 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect
+- **Skills** — 17 C-suite officer skills (see Skill Routing below)
+- **Agents** — 13 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect, cco-writer, cmo-strategist, clo-counsel
 - **Loop detection** — Ralph Wiggum detector catches agents stuck in unproductive cycles
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
 - **Dependency** — `@modelcontextprotocol/sdk`
@@ -26,8 +26,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
   - `tools/` — Task, lifecycle, backlog, monitoring, knowledge, eval, session, graph tool handlers
   - `config/` — Defaults, metrics targets
   - `test/` — node:test smoke tests (lifecycle, recovery, eval, deps, router)
-- `skills/` — 14 SKILL.md files (C-suite officers)
-- `agents/` — 10 agent definitions
+- `skills/` — 17 SKILL.md files (C-suite officers)
+- `agents/` — 13 agent definitions
 - `hooks/` — SessionStart cleanup, SessionEnd eval analysis, PreToolUse safety guardrails
 
 ## Task lifecycle
@@ -108,6 +108,9 @@ Recovery engine Rules 6a/6b detect agents stuck in unproductive loops:
 | `/workforce-cqo` | Chief Quality Officer | qa | qa, testplan, gates |
 | `/workforce-cdo` | Chief Design Officer | consult | consult, shotgun |
 | `/workforce-cplo` | Chief Planning Officer | plan | plan, scan, impact |
+| `/workforce-cco` | Chief Communications Officer | docs | docs, readme, api-ref, tutorial, changelog-prose |
+| `/workforce-cmo` | Chief Marketing Officer | position | position, launch-post, landing-copy, release-announce, persona |
+| `/workforce-clo` | Chief Legal Officer | review | review, license-check, dep-audit, privacy-scan, contract-redline, tos-implication |
 
 ## Tmux environment
 
