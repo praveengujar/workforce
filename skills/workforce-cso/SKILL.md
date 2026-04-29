@@ -18,10 +18,15 @@ When the user invokes /workforce-cso, run a security audit.
 1. Determine mode from arguments
 2. Gather the target: task diff (`workforce_get_diff`), `git diff`, or full codebase scan
 3. Run the 14-phase audit (phase details in `agents/security-auditor.md`)
-4. Apply confidence gating — standard mode discards findings below 8/10
-5. Filter false positives (except: CI/CD findings and LLM cost attacks are never discarded)
-6. Present findings report
-7. If task mode: feed results into review scoring
+4. **Confidence Calibration Reasoning** — for each finding before applying the threshold:
+   - **Exploitability trace**: Walk the complete attack path — entry point → vulnerable code → impact. If any step requires conditions you can't verify (e.g., "if auth is misconfigured", "if user has admin role"), drop confidence by 2 and mark the assumption explicitly. Theoretical findings score lower than traceable ones.
+   - **Framework defense check**: Is this pattern protected by a framework-level defense already in this stack? (ORMs prevent SQLi, React escapes by default, CSRF tokens default-on, CSP headers set.) Verify the defense is *active* in this codebase — don't trust the framework's reputation, check the config. If active, discard the finding.
+   - **Severity right-sizing**: What is the *realistic* impact if exploited — not theoretical worst-case, but likely outcome given this stack and deployment? Would this get a CVE? Would it make the news? Or is it a hardening suggestion? Adjust severity based on actual exploitability, not pattern-match severity.
+   - **Variant scan**: Before reporting one instance, grep for the same pattern elsewhere in the codebase. One finding becomes a class — report the class with N instances, not N separate findings.
+5. Apply confidence gating — standard mode discards findings below 8/10
+6. Filter false positives (except: CI/CD findings and LLM cost attacks are never discarded)
+7. Present findings report
+8. If task mode: feed results into review scoring
 
 ## Findings Report
 
