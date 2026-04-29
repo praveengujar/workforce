@@ -1,0 +1,15 @@
+{
+  "id": "01-add-jsdoc-to-utility",
+  "taskType": "standard",
+  "prompt": "Add a JSDoc block to the elapsed() function in mcp-server/tools/formatters.js documenting parameters and return value.",
+  "plannedFiles": ["mcp-server/tools/formatters.js"],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Low-risk doc-only change. Single-file scope, no logic touched, expected to merge cleanly with high review score.",
+  "expected": {
+    "mergeEligible": true,
+    "reviewScore": 92.0,
+    "tokensUsed": 4200,
+    "ralphWiggumIncidents": 0
+  }
+}

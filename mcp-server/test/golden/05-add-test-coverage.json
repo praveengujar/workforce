@@ -1,0 +1,18 @@
+{
+  "id": "05-add-test-coverage",
+  "taskType": "standard",
+  "prompt": "Add a node:test smoke test for the cost-watchdog scan() function: assert that running tasks above per_task_max get killed and that tasks below the threshold are left alone.",
+  "plannedFiles": [
+    "mcp-server/test/cost-watchdog.test.js",
+    "mcp-server/core/cost-watchdog.js"
+  ],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Test-authoring task. New file plus light source touch to expose internals. Validates the harness against tasks that change test files only.",
+  "expected": {
+    "mergeEligible": true,
+    "reviewScore": 88.0,
+    "tokensUsed": 9300,
+    "ralphWiggumIncidents": 0
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "scoreVersion": 1,
+  "tasks": [
+    {
+      "fixtureId": "01-add-jsdoc-to-utility",
+      "taskType": "standard",
+      "mergeEligible": true,
+      "reviewScore": 92,
+      "tokensUsed": 4200,
+      "ralphWiggumIncidents": 0,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    },
+    {
+      "fixtureId": "02-extract-shared-helper",
+      "taskType": "standard",
+      "mergeEligible": true,
+      "reviewScore": 84.5,
+      "tokensUsed": 11800,
+      "ralphWiggumIncidents": 0,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    },
+    {
+      "fixtureId": "03-investigate-ralph-loop",
+      "taskType": "analysis",
+      "mergeEligible": false,
+      "reviewScore": 78,
+      "tokensUsed": 6500,
+      "ralphWiggumIncidents": 0,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    },
+    {
+      "fixtureId": "04-fix-rate-limit-retry",
+      "taskType": "standard",
+      "mergeEligible": true,
+      "reviewScore": 80,
+      "tokensUsed": 18400,
+      "ralphWiggumIncidents": 1,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    },
+    {
+      "fixtureId": "05-add-test-coverage",
+      "taskType": "standard",
+      "mergeEligible": true,
+      "reviewScore": 88,
+      "tokensUsed": 9300,
+      "ralphWiggumIncidents": 0,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    },
+    {
+      "fixtureId": "06-failed-zero-work",
+      "taskType": "standard",
+      "mergeEligible": false,
+      "reviewScore": 35,
+      "tokensUsed": 7100,
+      "ralphWiggumIncidents": 2,
+      "pinnedSha": null,
+      "scoreVersion": 1
+    }
+  ],
+  "summary": {
+    "totals": {
+      "fixtures": 6,
+      "mergeEligible": 4,
+      "ralphWiggumIncidents": 3,
+      "tokensUsed": 57300
+    },
+    "averages": {
+      "reviewScore": 76.25,
+      "tokensUsed": 9550
+    },
+    "ralphWiggumIncidents": 3
+  }
+}
