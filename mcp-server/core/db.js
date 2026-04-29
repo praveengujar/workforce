@@ -337,6 +337,38 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(14, new Date().toISOString());
     console.error('[db] Applied migration 14: replay_runs table');
   }
+
+  // Migration 15: episodic_memory (Context Fabric M1) — capture successful
+  // task trajectories as few-shot examples per PRD §9.3.
+  const m15 = db.prepare('SELECT version FROM schema_migrations WHERE version = 15').get();
+  if (!m15) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS episodic_memory (
+        id               TEXT PRIMARY KEY,
+        project          TEXT NOT NULL,
+        task_id          TEXT NOT NULL,
+        task_type        TEXT NOT NULL,
+        outcome          TEXT NOT NULL,
+        glob_signature   TEXT NOT NULL,
+        prompt_summary   TEXT NOT NULL,
+        approach_summary TEXT NOT NULL,
+        files_touched    TEXT NOT NULL,
+        review_score     REAL,
+        tokens_used      INTEGER,
+        retry_count      INTEGER DEFAULT 0,
+        trust_score      REAL NOT NULL DEFAULT 0.7,
+        retrieval_count  INTEGER DEFAULT 0,
+        ttl_days         INTEGER DEFAULT 90,
+        created_at       TEXT NOT NULL,
+        UNIQUE(project, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_episodic_memory_project ON episodic_memory(project);
+      CREATE INDEX IF NOT EXISTS idx_episodic_memory_glob_signature ON episodic_memory(glob_signature);
+      CREATE INDEX IF NOT EXISTS idx_episodic_memory_created_at ON episodic_memory(created_at);
+    `);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(15, new Date().toISOString());
+    console.error('[db] Applied migration 15: episodic_memory table');
+  }
 }
 
 // ---------------------------------------------------------------------------
