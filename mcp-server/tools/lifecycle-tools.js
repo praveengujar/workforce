@@ -7,6 +7,7 @@ import { getTask, updateTask } from '../core/db.js';
 import { logEvent, getTaskTimeline } from '../core/task-events.js';
 import { mergeWorktree, cleanupWorktree } from '../core/worker-manager.js';
 import { gitExec } from '../core/constants.js';
+import { captureEpisode, isEpisodicEnabled } from '../core/episodic-memory.js';
 
 // ---------------------------------------------------------------------------
 // Gate enforcement — required evidence phases before merge
@@ -143,6 +144,19 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
   if (freshTask.status === 'failed' || freshTask.mergeFailed) {
     return { ok: false, merged: false, error: freshTask.error || 'Merge failed' };
   }
+
+  // Best-effort episodic capture — never fails the merge.
+  if (isEpisodicEnabled()) {
+    setImmediate(() => {
+      try {
+        const merged = getTask(task_id);
+        if (merged) captureEpisode({ task: merged, repoRoot: _projectDir });
+      } catch (err) {
+        console.error(`[lifecycle] episodic capture failed for ${task_id}: ${err.message}`);
+      }
+    });
+  }
+
   return { ok: true, merged: true, waivedGates: gateResult.waived };
 }
 
