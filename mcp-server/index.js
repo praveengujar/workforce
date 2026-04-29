@@ -84,6 +84,10 @@ import {
 
 import { replayGoldenSetHandler } from './tools/replay-tools.js';
 
+import {
+  captureEpisodeHandler, recallEpisodesHandler,
+} from './tools/episodic-tools.js';
+
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
 import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
@@ -703,6 +707,32 @@ server.tool(
       return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
     }
   },
+);
+
+// ---------------------------------------------------------------------------
+// Context Fabric — Episodic Memory (M1)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_capture_episode',
+  'Capture a successful task trajectory as an episodic memory entry. Idempotent on (project, task_id). Called automatically by workforce_approve_task on merge; can also be invoked manually. Summarises prompt + diff via a small Haiku call; falls back to a placeholder approach summary if the CLI is unavailable.',
+  {
+    task_id: z.string().describe('Task ID to capture'),
+    repo_root: z.string().optional().describe('Repo root for git diff; defaults to task.worktreePath or cwd'),
+  },
+  wrap(captureEpisodeHandler),
+);
+
+server.tool(
+  'workforce_recall_episodes',
+  'Recall up to N past similar successful episodes for an upcoming task. Ranks by keyword overlap on prompt_summary plus glob match on planned files; filters by trust_score >= 0.5 and within ttl_days. Used by worker layer 5b at spawn time.',
+  {
+    project: z.string().describe('Project name to scope the recall'),
+    prompt: z.string().describe('Upcoming task prompt to match against past prompt summaries'),
+    planned_files: z.array(z.string()).optional().describe('Files the upcoming task is expected to touch (used for glob match)'),
+    max_n: z.number().optional().describe('Max episodes to return (default 3)'),
+  },
+  wrap(recallEpisodesHandler),
 );
 
 // ---------------------------------------------------------------------------

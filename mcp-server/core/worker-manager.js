@@ -57,6 +57,7 @@ import { estimateTaskCost } from './task-cost.js';
 import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 import { getRulesForPaths, getRulesForKeywords, extractPathsFromText } from './knowledge-rules.js';
 import { getAllSessionContext } from './session-context.js';
+import { recallEpisodes, isEpisodicEnabled } from './episodic-memory.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -630,6 +631,43 @@ VERIFY: Re-read every file you modified. Do the changes satisfy the requirements
     }
   } catch {
     // ignore
+  }
+
+  // Layer 5b: Past similar successes — episodic memory recall (PRD §9.3 / M1).
+  // Wrapped in try/catch — recall failure NEVER breaks spawn.
+  if (isEpisodicEnabled() && task.project) {
+    try {
+      const plannedFiles = extractPathsFromText(task.prompt || '');
+      const episodes = recallEpisodes({
+        project: task.project,
+        prompt: task.prompt || '',
+        plannedFiles,
+        maxN: 3,
+      });
+      if (episodes.length > 0) {
+        const EPISODIC_BUDGET = 1500;
+        const lines = [];
+        for (const ep of episodes) {
+          const dateOnly = (ep.created_at || '').slice(0, 10);
+          const sigShort = (ep.glob_signature || '').slice(0, 120);
+          const promptShort = (ep.prompt_summary || '').replace(/\s+/g, ' ').slice(0, 220);
+          const approachShort = (ep.approach_summary || '').replace(/\s+/g, ' ').slice(0, 320);
+          const reviewPart = ep.review_score != null ? ` Review score: ${ep.review_score}.` : '';
+          lines.push(
+            `Task ${String(ep.task_id).slice(0, 8)} (${dateOnly}, glob=${sigShort})\n`
+            + `  Asked: ${promptShort}\n`
+            + `  Approach that worked: ${approachShort}.${reviewPart}`,
+          );
+        }
+        let block = lines.join('\n\n');
+        if (block.length > EPISODIC_BUDGET) {
+          block = block.slice(0, EPISODIC_BUDGET) + '\n…(truncated)';
+        }
+        effectivePrompt += `\n\n[Past Similar Successes — Trust: HIGH (episodic from merged tasks)]\n${block}`;
+      }
+    } catch (err) {
+      console.error(`[worker-manager] episodic recall failed: ${err.message}`);
+    }
   }
 
   // Layer 5: Upstream task results — inject dependency outputs
