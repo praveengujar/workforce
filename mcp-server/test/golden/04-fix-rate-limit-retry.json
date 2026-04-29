@@ -1,0 +1,15 @@
+{
+  "id": "04-fix-rate-limit-retry",
+  "taskType": "standard",
+  "prompt": "Fix the retry-after backoff in mcp-server/core/recovery-engine.js so that 429 responses honour the Retry-After header instead of using the fixed 600ms backoff.",
+  "plannedFiles": ["mcp-server/core/recovery-engine.js"],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Targeted bug fix in a hot path. Captures the case where the agent retried twice before landing the fix — exercises retry-tolerant scoring.",
+  "expected": {
+    "mergeEligible": true,
+    "reviewScore": 80.0,
+    "tokensUsed": 18400,
+    "ralphWiggumIncidents": 1
+  }
+}

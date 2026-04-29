@@ -1,0 +1,15 @@
+{
+  "id": "03-investigate-ralph-loop",
+  "taskType": "analysis",
+  "prompt": "Investigate why a recently spawned task entered a same_error_2x loop on test-fixture path. Produce findings.md with hypothesis, supporting events from task_events, and a recommended next-step task.",
+  "plannedFiles": [],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Investigation-only task. No diff expected (analysis tasks skip the zero-work guard). Validates that the harness handles non-merging task types — analysis tasks are not merge-eligible by definition.",
+  "expected": {
+    "mergeEligible": false,
+    "reviewScore": 78.0,
+    "tokensUsed": 6500,
+    "ralphWiggumIncidents": 0
+  }
+}

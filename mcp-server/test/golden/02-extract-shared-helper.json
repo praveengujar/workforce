@@ -1,0 +1,19 @@
+{
+  "id": "02-extract-shared-helper",
+  "taskType": "standard",
+  "prompt": "Two tool handlers compute the same task-status badge string inline. Extract a shared helper formatStatusBadge(status) into mcp-server/tools/formatters.js and have both call sites import it.",
+  "plannedFiles": [
+    "mcp-server/tools/formatters.js",
+    "mcp-server/tools/task-tools.js",
+    "mcp-server/tools/monitoring-tools.js"
+  ],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Reuse-before-create refactor across three files. Tests the assembler's ability to surface 'one fact, one home' rule and dependency-aware context.",
+  "expected": {
+    "mergeEligible": true,
+    "reviewScore": 84.5,
+    "tokensUsed": 11800,
+    "ralphWiggumIncidents": 0
+  }
+}
