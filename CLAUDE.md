@@ -1,4 +1,4 @@
-# Workforce v3.4.0
+# Workforce v3.5.0
 
 Claude Code plugin for managing autonomous agent sessions with self-improving context management.
 

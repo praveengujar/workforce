@@ -22,6 +22,18 @@ Create, list, query, delete path-scoped knowledge rules. `/workforce-cio` or `/w
 
 Categories: standards, architecture, testing, security, workflow, patterns, custom. Priority 1-10.
 
+#### Rule Quality Reasoning (mandatory before create)
+
+Rules feed into every future task prompt — bad rules compound across hundreds of agent runs. Before calling `workforce_create_rule`, complete this:
+
+- **Causal-chain test**: Trace what *will go wrong* if this rule does NOT exist. If you can't name a specific past failure or a specific class of bug this prevents, the rule is decoration. Don't create it.
+- **Specificity test**: Does the rule name *what* to do (or not do) and *why*? Vague rules ("write good code") are worse than no rule — they consume token budget without changing behavior. A rule should be concrete enough that two engineers would apply it the same way.
+- **Existing-rule overlap check**: Run `workforce_list_rules` filtered to the same category. If a rule already covers >70% of this scope, *update the existing rule* instead. Two overlapping rules at different priorities create injection conflicts.
+- **Path scope honesty**: The narrowest correct glob wins. `src/auth/**` beats `src/**` beats `**/*`. Wider scope = more tasks pay the token cost — earn the breadth with proven applicability.
+- **Priority calibration**: Reserve P9-P10 for hard correctness/security rules. P5-P7 for project conventions. P1-P4 for preferences. Inflated priorities make the priority signal useless.
+
+If any test fails, refine the rule or skip creation — surface to user with the specific failure.
+
 ```
 ━━━ KNOWLEDGE RULES ({count}) ━━━━━━━━━━━━━━━━━━━━━━━
   [P8] security    auth-middleware    src/auth/**

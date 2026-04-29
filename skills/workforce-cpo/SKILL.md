@@ -28,6 +28,17 @@ Manage work items — add, update, remove, reorder, analyze, launch. `/workforce
 
 Actions: `add: {desc}`, `remove #N`, `set #N to high`, `move #N to #1`, `analyze` (AI stack-rank), `launch #N` (create task).
 
+#### Prioritization Reasoning (mandatory before reorder/analyze)
+
+Default action is the user-facing entry point — bad orderings here mislead the human. Before reordering or rendering analysis, complete this:
+
+- **Impact-vs-loudness check**: Is this item high-priority because it delivers measurable value, or because someone is asking loudly? "Loud" requests cluster at the top by default — verify each top-3 item against actual user benefit, not request volume.
+- **Dependency-blocking detection**: Walk the list — does any later item depend on an earlier item not being done first? An item that unblocks 3 others outranks a higher-impact item that unblocks nothing. Scan for hidden dependency edges before scoring.
+- **Effort honesty test**: Has this item been attempted before? If yes, the effort estimate goes UP, not stays flat — re-attempts hit the same blockers. Does it need investigation first? If yes, split into an analysis task ahead of it.
+- **Sanity check**: After ordering, look at the final ranking. If item #5 intuitively feels more important than item #1, the scoring weights are wrong. Adjust weights and re-score, don't override one item.
+
+For deep autonomous prioritization, hand off to `cpo-analyst` agent (which has the full scoring framework).
+
 ### release
 Aggregate completed tasks into release notes. `/workforce-cpo release`
 

@@ -16,7 +16,12 @@ Generate and run E2E tests for tasks in review. `/workforce-cqo` or `/workforce-
 
 1. `workforce_list_tasks` with `status_filter: "review"`
 2. For each: `workforce_task_output` + `workforce_get_diff`
-3. Determine strategy by change type:
+3. **QA Strategy Reasoning** (mandatory before lookup-table strategy selection):
+   - **Behavior-coverage map**: What user-visible behaviors does this diff change? List them as verbs ("user can submit form", "API returns 401 on bad token"). The test set must cover each verb at least once. If the diff has zero user-visible behaviors, E2E is wrong tool — surface that and skip.
+   - **Cheapest-test-that-proves-it**: For each behavior, what is the *cheapest* test that proves it works? Unit (fast, isolated) → Integration (boundary-crossing) → E2E (full workflow). Don't use E2E to verify what a unit test would catch — E2E is slow, flaky, and expensive. Reserve E2E for true workflow verification.
+   - **Regression risk surface**: What existing behaviors AREN'T being changed but COULD break as a side effect? (Shared utilities edited, props changed, schema migrations, config changes.) These are *highest-priority* regression tests, often missed because they're not in the diff.
+   - **Fallback rationale**: Lookup table below is a default — if reasoning above contradicts it, prefer reasoning. Document why in the QA plan.
+4. Determine strategy by change type:
 
 | Change Type | Test Approach |
 |-------------|---------------|
@@ -27,7 +32,7 @@ Generate and run E2E tests for tasks in review. `/workforce-cqo` or `/workforce-
 | Auth flows | Login flow, protected routes |
 | No UI | Skip E2E, suggest unit tests |
 
-4. Present QA plan, on approval create QA tasks via `workforce_create_task` with `depends_on`
+5. Present QA plan, on approval create QA tasks via `workforce_create_task` with `depends_on`
 
 ```
 ━━━ CQO QA PLAN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
