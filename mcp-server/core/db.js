@@ -319,6 +319,24 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(13, new Date().toISOString());
     console.error('[db] Applied migration 13: Ralph Wiggum loop detection fields');
   }
+
+  // Migration 14: replay_runs table for golden-set baselines (Context Fabric M0)
+  const m14 = db.prepare('SELECT version FROM schema_migrations WHERE version = 14').get();
+  if (!m14) {
+    const ddl = [
+      `CREATE TABLE IF NOT EXISTS replay_runs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id          TEXT NOT NULL UNIQUE,
+        run_at          TEXT NOT NULL,
+        scorecard_json  TEXT NOT NULL,
+        baseline_run_id TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_replay_runs_run_at ON replay_runs(run_at)`,
+    ];
+    for (const stmt of ddl) db.exec(stmt);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(14, new Date().toISOString());
+    console.error('[db] Applied migration 14: replay_runs table');
+  }
 }
 
 // ---------------------------------------------------------------------------

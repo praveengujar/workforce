@@ -1,0 +1,15 @@
+{
+  "id": "06-failed-zero-work",
+  "taskType": "standard",
+  "prompt": "Improve the worker manager. Make it better.",
+  "plannedFiles": [],
+  "pinnedSha": null,
+  "fixtureKind": "synthetic",
+  "description": "Vague prompt that historically triggers the zero-work guard. Negative case — exercises the assembler's behaviour when context cannot rescue an underspecified prompt.",
+  "expected": {
+    "mergeEligible": false,
+    "reviewScore": 35.0,
+    "tokensUsed": 7100,
+    "ralphWiggumIncidents": 2
+  }
+}

@@ -82,6 +82,8 @@ import {
   dependencyGraphHandler, setGraphProjectDir,
 } from './tools/graph-tools.js';
 
+import { replayGoldenSetHandler } from './tools/replay-tools.js';
+
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
 import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
@@ -675,6 +677,32 @@ server.tool(
     project_dir: z.string().optional().describe('Project directory (default: cwd)'),
   },
   wrap(dependencyGraphHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Context Fabric — Golden Replay Harness (M0)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_replay_golden_set',
+  'Run the Context Fabric golden replay set: load frozen task fixtures, score each (mergeEligible, reviewScore, tokensUsed, ralphWiggumIncidents), and emit a scorecard with optional delta vs a baseline. Each run is persisted to the replay_runs table. Used as the gate for every later Context Fabric milestone.',
+  {
+    golden_dir: z.string().optional().describe('Override fixture directory (absolute path or cwd-relative). Default: mcp-server/test/golden/'),
+    baseline_json: z.string().optional().describe('Baseline scorecard path for delta reporting (absolute, or relative to golden_dir). Default: baseline.json inside golden_dir'),
+    dry_run: z.boolean().optional().describe('Reserved for future re-execution mode; ignored in M0 (scoring is always pure)'),
+    format: z.enum(['text', 'json']).optional().describe('Output format. Default: text'),
+  },
+  async (params) => {
+    try {
+      const result = await replayGoldenSetHandler(params);
+      if (typeof result === 'string') {
+        return { content: [{ type: 'text', text: result }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+    }
+  },
 );
 
 // ---------------------------------------------------------------------------
