@@ -388,6 +388,43 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(17, new Date().toISOString());
     console.error('[db] Applied migration 17: context_items + context_blocks + task_context_audits + prompt_layers');
   }
+
+  // Migration 18: Context Fabric M7 — proposed_rules queue for capture-pipeline
+  // candidates (eval clusters, risk keyword hits, decision keyword hits, manual
+  // drafts). Approval workflow is deferred to PRD §16 P3.1; M7 is write-only.
+  const m18 = db.prepare('SELECT version FROM schema_migrations WHERE version = 18').get();
+  if (!m18) {
+    applyMigration18(db);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(18, new Date().toISOString());
+    console.error('[db] Applied migration 18: proposed_rules table');
+  }
+}
+
+const M18_DDL = `
+  CREATE TABLE IF NOT EXISTS proposed_rules (
+    id              TEXT PRIMARY KEY,
+    project         TEXT NOT NULL,
+    source_type     TEXT NOT NULL,
+    source_id       TEXT,
+    draft_category  TEXT,
+    draft_name      TEXT,
+    draft_paths     TEXT,
+    draft_content   TEXT NOT NULL,
+    evidence        TEXT,
+    trust_score     REAL NOT NULL DEFAULT 0.6,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    authored_by     TEXT,
+    reviewed_by     TEXT,
+    reviewed_at     TEXT,
+    created_at      TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_proposed_rules_project ON proposed_rules(project);
+  CREATE INDEX IF NOT EXISTS idx_proposed_rules_status ON proposed_rules(status);
+  CREATE INDEX IF NOT EXISTS idx_proposed_rules_created_at ON proposed_rules(created_at);
+`;
+
+export function applyMigration18(db) {
+  db['exec'](M18_DDL);
 }
 
 const M17_DDL = `
