@@ -112,6 +112,10 @@ Recovery engine Rules 6a/6b detect agents stuck in unproductive loops:
 | `/workforce-cmo` | Chief Marketing Officer (+ PMM mode) | position | **CMO**: position, launch-post, landing-copy, release-announce, persona / **PMM**: messaging-house, launch-plan, battlecard, icp, win-loss, enablement |
 | `/workforce-clo` | Chief Legal Officer | review | review, license-check, dep-audit, privacy-scan, contract-redline, tos-implication |
 
+## Context Fabric mode
+
+`WORKFORCE_CONTEXT_FABRIC_MODE` controls Context Fabric (M6) worker integration. The hardcoded 10-layer block above always runs as a safety net; the fabric block is purely additive (PREPENDED, never replacing). Modes: **`off`** (assembler skipped entirely), **`shadow`** (default — assembler runs to write audit + per-layer telemetry, prompt unchanged), **`analysis`** (assembler block injected only for `analysis` tasks), **`all`** (assembler block injected for every task). Resolution: env var → `context.fabricMode` in `defaults.json` → fallback `shadow`. Unknown values warn to stderr and fall back to `shadow`. Assembler errors are isolated — a fabric failure never breaks a task spawn.
+
 ## Tmux environment
 
 Tmux sessions explicitly export auth-critical env vars (`CLAUDE_*`, `ANTHROPIC_*`, `HOME`, `PATH`) since tmux sessions inherit from the tmux server, not the creating client.
