@@ -58,6 +58,8 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 import { getRulesForPaths, getRulesForKeywords, extractPathsFromText } from './knowledge-rules.js';
 import { getAllSessionContext } from './session-context.js';
 import { recallEpisodes, isEpisodicEnabled } from './episodic-memory.js';
+import { assembleContext } from './context-assembler.js';
+import { applyContextFabric } from './context-fabric-mode.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -772,6 +774,28 @@ Before finishing, verify your work:
 - Check: do your changes work with the existing patterns (imports, naming, error handling)?
 - If a test command is available, run it.
 - Write a one-sentence summary of what you changed and why (this becomes the result summary).`;
+  }
+
+  // Context Fabric (M6): in shadow mode, run the assembler purely for its
+  // audit + per-layer telemetry side-effects (prompt unchanged). In analysis
+  // mode, prepend its prompt block to analysis tasks only. In 'all' mode,
+  // prepend for every task. The hardcoded 10-layer block above STAYS as the
+  // safety net — assembler failure must never break a spawn.
+  try {
+    const fabric = applyContextFabric({
+      task,
+      hardcodedPrompt: effectivePrompt,
+      repoRoot,
+      assembler: assembleContext,
+    });
+    effectivePrompt = fabric.prompt;
+    if (fabric.fabricInjected) {
+      logEvent(taskId, 'context_fabric_injected', `mode=${fabric.fabricMode}`);
+    }
+  } catch (err) {
+    // Defense-in-depth: applyContextFabric already isolates assembler errors,
+    // but if it itself throws (shouldn't happen), keep the spawn alive.
+    console.error(`[worker-manager] context fabric integration error: ${err.message}`);
   }
 
   // 3. Spawn Claude CLI

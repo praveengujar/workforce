@@ -6,6 +6,7 @@
   "recoveryIntervalMs": 30000,
   "promoteIntervalMs": 5000,
   "context": {
-    "captureSuccessfulTasks": true
+    "captureSuccessfulTasks": true,
+    "fabricMode": "shadow"
   }
 }
