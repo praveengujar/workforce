@@ -88,6 +88,13 @@ import {
   captureEpisodeHandler, recallEpisodesHandler,
 } from './tools/episodic-tools.js';
 
+import {
+  addContextItemHandler, searchContextItemsHandler,
+  previewContextHandler, auditContextHandler,
+  invalidateContextHandler, promoteContextHandler,
+  compactContextHandler,
+} from './tools/context-memory-tools.js';
+
 import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.js';
 import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
@@ -733,6 +740,104 @@ server.tool(
     max_n: z.number().optional().describe('Max episodes to return (default 3)'),
   },
   wrap(recallEpisodesHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Context Fabric — Memory MCP Tools (M5)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_context_add',
+  'Add a context item to the durable memory store. Caller is auto-tagged via WORKFORCE_AGENT_TASK_ID — agent writes are clamped at trust_score=0.4 (poisoning defense).',
+  {
+    project: z.string().describe('Project name'),
+    memoryType: z.enum(['semantic', 'episodic', 'procedural', 'artifact', 'decision', 'risk', 'preference']).describe('Memory type per PRD §9.1'),
+    title: z.string().describe('Short title for the memory'),
+    content: z.string().describe('The memory body'),
+    scopeType: z.enum(['project', 'task_group', 'task', 'agent', 'global']).describe('Scope of this memory'),
+    scopeId: z.string().optional().describe('Scope identifier (task_id, group_id, etc.)'),
+    paths: z.array(z.string()).optional().describe('Glob patterns for path-based retrieval'),
+    tags: z.array(z.string()).optional().describe('Free-form tags'),
+    trust: z.string().optional().describe('UX trust label (low/medium/high) — derived from trustScore if omitted'),
+    trustScore: z.number().optional().describe('Numeric trust score 0–1 (clamped to source ceiling)'),
+    ttlDays: z.number().optional().describe('Optional time-to-live in days'),
+  },
+  wrap(addContextItemHandler),
+);
+
+server.tool(
+  'workforce_context_search',
+  'Search durable context memory. Free-text query via FTS5 (or LIKE fallback); also filters by memoryType, paths, trust threshold. Defaults exclude invalidated rows.',
+  {
+    project: z.string().describe('Project name'),
+    query: z.string().optional().describe('Free-text query; if omitted, returns project items by filter'),
+    memoryType: z.enum(['semantic', 'episodic', 'procedural', 'artifact', 'decision', 'risk', 'preference']).optional().describe('Filter by memory type'),
+    paths: z.array(z.string()).optional().describe('Filter by path overlap'),
+    includeInvalidated: z.boolean().optional().describe('Include invalidated rows (default false)'),
+    trustThreshold: z.number().optional().describe('Override default trust threshold (0.5)'),
+    limit: z.number().optional().describe('Max items to return'),
+  },
+  wrap(searchContextItemsHandler),
+);
+
+server.tool(
+  'workforce_context_preview',
+  'Preview the context the assembler would inject for a task before launch. Returns {promptBlock, sections, audit}. Does NOT write an audit row (preview-only).',
+  {
+    project: z.string().describe('Project name'),
+    prompt: z.string().describe('Task prompt to assemble context for'),
+    taskType: z.enum(['standard', 'analysis', 'experiment', 'measurement']).optional().describe('Task type'),
+    taskGroup: z.string().optional().describe('Task group ID for shared context'),
+    dependsOn: z.array(z.string()).optional().describe('Upstream task IDs'),
+    budget: z.number().optional().describe('Override default budget chars'),
+    trustThreshold: z.number().optional().describe('Override default trust threshold'),
+  },
+  wrap(previewContextHandler),
+);
+
+server.tool(
+  'workforce_context_audit',
+  'Inspect the context audits for a past task — selected, omitted (with reason), conflicts, per-layer telemetry. Returns empty list for unknown tasks.',
+  {
+    taskId: z.string().describe('Task ID'),
+  },
+  wrap(auditContextHandler),
+);
+
+server.tool(
+  'workforce_context_invalidate',
+  'Mark a context item invalid (Mem0 ADD-only pattern). The row is preserved for audit; default search/list excludes it.',
+  {
+    id: z.string().describe('context_item id to invalidate'),
+    reason: z.string().optional().describe('Why this is being invalidated'),
+    invalidatedBy: z.string().optional().describe('Override the inferred caller (defaults to caller provenance)'),
+  },
+  wrap(invalidateContextHandler),
+);
+
+server.tool(
+  'workforce_context_promote',
+  'Propose a promotion of a context item to higher-trust storage (core_block | knowledge_rule | high_trust_memory). Intent-only in v3.6 per PRD §9.7 — returns the candidate; does NOT auto-apply. Caller must gate via AskUserQuestion.',
+  {
+    id: z.string().describe('source context_item id'),
+    target: z.enum(['core_block', 'knowledge_rule', 'high_trust_memory']).describe('Promotion target'),
+    label: z.string().optional().describe('Optional label override (defaults to source title)'),
+    requiresApproval: z.boolean().optional().describe('Whether the apply step must be human-approved (default true)'),
+  },
+  wrap(promoteContextHandler),
+);
+
+server.tool(
+  'workforce_context_compact',
+  'Find near-duplicate context items (same title + content hash) and invalidate the duplicates. Preserves the canonical row (oldest by created_at; ties broken by highest trust). Never merges content. dryRun returns candidates without mutating.',
+  {
+    project: z.string().describe('Project name'),
+    scopeType: z.enum(['project', 'task_group', 'task', 'agent', 'global']).optional().describe('Restrict to a scope type'),
+    olderThanDays: z.number().optional().describe('Only compact items older than this many days'),
+    memoryType: z.enum(['semantic', 'episodic', 'procedural', 'artifact', 'decision', 'risk', 'preference']).optional().describe('Restrict to a memory type'),
+    dryRun: z.boolean().optional().describe('Preview candidates without invalidating (default false)'),
+  },
+  wrap(compactContextHandler),
 );
 
 // ---------------------------------------------------------------------------
