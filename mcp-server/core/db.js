@@ -380,6 +380,117 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(16, new Date().toISOString());
     console.error('[db] Applied migration 16: provenance + trust columns on session_context and knowledge_rules');
   }
+
+  // Migration 17: Context Fabric M3 — full context schema (PRD §9.1, §9.2, §9.4, §9.5).
+  const m17 = db.prepare('SELECT version FROM schema_migrations WHERE version = 17').get();
+  if (!m17) {
+    applyMigration17(db);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(17, new Date().toISOString());
+    console.error('[db] Applied migration 17: context_items + context_blocks + task_context_audits + prompt_layers');
+  }
+}
+
+const M17_DDL = `
+  CREATE TABLE IF NOT EXISTS context_items (
+    id                       TEXT PRIMARY KEY,
+    project                  TEXT NOT NULL,
+    scope_type               TEXT NOT NULL,
+    scope_id                 TEXT,
+    memory_type              TEXT NOT NULL,
+    title                    TEXT NOT NULL,
+    content                  TEXT NOT NULL,
+    summary                  TEXT,
+    source_type              TEXT NOT NULL,
+    source_id                TEXT,
+    source_chain             TEXT,
+    authored_by              TEXT,
+    paths                    TEXT,
+    tags                     TEXT,
+    glob_signature           TEXT,
+    trust                    TEXT NOT NULL DEFAULT 'low',
+    trust_score              REAL NOT NULL DEFAULT 0.4,
+    confidence               REAL DEFAULT 0.5,
+    last_validated_at        TEXT,
+    retrieval_count          INTEGER DEFAULT 0,
+    retrieval_outcome_score  REAL,
+    valid_from               TEXT,
+    invalid_at               TEXT,
+    invalidated_by           TEXT,
+    invalidation_reason      TEXT,
+    ttl_days                 INTEGER,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_context_items_project ON context_items(project);
+  CREATE INDEX IF NOT EXISTS idx_context_items_scope ON context_items(scope_type, scope_id);
+  CREATE INDEX IF NOT EXISTS idx_context_items_memory_type ON context_items(memory_type);
+  CREATE INDEX IF NOT EXISTS idx_context_items_source ON context_items(source_type);
+  CREATE INDEX IF NOT EXISTS idx_context_items_validity ON context_items(invalid_at);
+  CREATE INDEX IF NOT EXISTS idx_context_items_glob_signature ON context_items(glob_signature);
+
+  CREATE TABLE IF NOT EXISTS context_blocks (
+    id            TEXT PRIMARY KEY,
+    project       TEXT NOT NULL,
+    label         TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    value         TEXT NOT NULL,
+    char_limit    INTEGER NOT NULL DEFAULT 2000,
+    trust         TEXT NOT NULL DEFAULT 'medium',
+    trust_score   REAL NOT NULL DEFAULT 0.7,
+    read_only     INTEGER NOT NULL DEFAULT 0,
+    source_type   TEXT NOT NULL DEFAULT 'human',
+    authored_by   TEXT,
+    updated_by    TEXT,
+    version       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(project, label)
+  );
+
+  CREATE TABLE IF NOT EXISTS task_context_audits (
+    id                       TEXT PRIMARY KEY,
+    task_id                  TEXT NOT NULL,
+    project                  TEXT,
+    prompt_hash              TEXT,
+    context_hash             TEXT,
+    budget                   INTEGER,
+    selected_items           TEXT,
+    omitted_items            TEXT,
+    conflicts                TEXT,
+    trust_threshold          REAL,
+    assembled_prompt_preview TEXT,
+    per_layer_chars          TEXT,
+    created_at               TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_context_audits_task_id ON task_context_audits(task_id);
+
+  CREATE TABLE IF NOT EXISTS prompt_layers (
+    task_id          TEXT NOT NULL,
+    layer_num        INTEGER NOT NULL,
+    layer_name       TEXT NOT NULL,
+    char_count       INTEGER NOT NULL,
+    was_truncated    INTEGER NOT NULL DEFAULT 0,
+    retrieval_count  INTEGER,
+    selected_count   INTEGER,
+    PRIMARY KEY (task_id, layer_num)
+  );
+`;
+
+const M17_FTS_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS context_items_fts USING fts5(
+    title, content, summary, tags,
+    content='context_items', content_rowid='rowid'
+  )
+`;
+
+export function applyMigration17(db) {
+  db['exec'](M17_DDL);
+  try {
+    db['exec'](M17_FTS_DDL);
+    console.error('[db] Migration 17: FTS5 context_items_fts available');
+  } catch (err) {
+    console.error(`[db] Migration 17: FTS5 unavailable — falling back to LIKE search (${err.message})`);
+  }
 }
 
 export function applyMigration16(db) {
