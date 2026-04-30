@@ -1311,6 +1311,22 @@ function cleanupWorktree(taskId, worktreePath) {
   const repoRoot = PROJECT_DIR;
   const branchName = `wf/${taskId}`;
 
+  // Preserve work when the merge step failed (e.g. protected-branch refusal,
+  // non-fast-forward conflict). Removing the worktree + branch + remote ref
+  // would silently destroy the agent's commits, leaving them recoverable only
+  // via `git fsck --dangling`. Operators recover by either rerunning approval
+  // after fixing the merge target, or by manually shipping the branch as a PR.
+  const task = getTask(taskId);
+  if (task && task.mergeFailed === 1) {
+    console.warn(
+      `[cleanupWorktree] Skipping cleanup for ${taskId}: merge failed, ` +
+      `preserving worktree at ${worktreePath} and branch ${branchName} ` +
+      `for recovery.`,
+    );
+    logEvent(taskId, 'cleanup_skipped_merge_failed', branchName);
+    return;
+  }
+
   // Remove symlinks before worktree removal (prevents deleting main workspace files)
   for (const target of ['node_modules', '.env', '.env.local', '.env.development']) {
     const linked = join(worktreePath, target);
