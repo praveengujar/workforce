@@ -369,6 +369,44 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(15, new Date().toISOString());
     console.error('[db] Applied migration 15: episodic_memory table');
   }
+
+  // Migration 16: provenance + trust columns on session_context and
+  // knowledge_rules (Context Fabric M2). Idempotent: each ALTER guarded by
+  // PRAGMA table_info so the migration is safe to re-run on partially
+  // upgraded databases.
+  const m16 = db.prepare('SELECT version FROM schema_migrations WHERE version = 16').get();
+  if (!m16) {
+    applyMigration16(db);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(16, new Date().toISOString());
+    console.error('[db] Applied migration 16: provenance + trust columns on session_context and knowledge_rules');
+  }
+}
+
+export function applyMigration16(db) {
+  const hasColumn = (table, col) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    return cols.some(c => c.name === col);
+  };
+  const TRUST_COLUMNS = [
+    ['source_type', 'TEXT'],
+    ['authored_by', 'TEXT'],
+    ['trust_score', 'REAL NOT NULL DEFAULT 0.5'],
+    ['last_validated_at', 'TEXT'],
+  ];
+  for (const table of ['session_context', 'knowledge_rules']) {
+    const exists = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+    ).get(table);
+    if (!exists) continue;
+    for (const [col, type] of TRUST_COLUMNS) {
+      if (!hasColumn(table, col)) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+      }
+    }
+    db.prepare(`UPDATE ${table} SET trust_score = 0.5 WHERE trust_score IS NULL`).run();
+    db.prepare(`UPDATE ${table} SET source_type = 'system' WHERE source_type IS NULL OR source_type = ''`).run();
+    db.prepare(`UPDATE ${table} SET authored_by = 'legacy' WHERE authored_by IS NULL OR authored_by = ''`).run();
+  }
 }
 
 // ---------------------------------------------------------------------------

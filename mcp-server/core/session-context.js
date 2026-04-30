@@ -6,6 +6,7 @@
  */
 
 import { getDb, stmt } from './db.js';
+import { clampTrustForSource, getTrustThreshold } from './trust.js';
 
 // ---------------------------------------------------------------------------
 // CRUD
@@ -13,8 +14,12 @@ import { getDb, stmt } from './db.js';
 
 /**
  * Set a session context value. Upserts on project+key.
+ *
+ * Optional fourth argument carries provenance metadata (Context Fabric M2).
+ * Legacy callers that pass only `(project, key, value)` are recorded as
+ * source=human / authoredBy=user / trust=1.0 — preserving prior behavior.
  */
-export function setSessionContext(project, key, value) {
+export function setSessionContext(project, key, value, opts = {}) {
   if (!project) throw new Error('project is required');
   if (!key) throw new Error('key is required');
   if (value === undefined) throw new Error('value is required');
@@ -23,10 +28,16 @@ export function setSessionContext(project, key, value) {
   const id = `${project}::${key}`;
   const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
 
+  const sourceType = opts.sourceType || 'human';
+  const authoredBy = opts.authoredBy || (sourceType === 'human' ? 'user' : sourceType);
+  const trustScore = clampTrustForSource(sourceType, opts.trustScore);
+  const lastValidatedAt = opts.lastValidatedAt ?? now;
+
   getDb().prepare(
-    `INSERT OR REPLACE INTO session_context (id, project, key, value, updatedAt)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(id, project, key, valueStr, now);
+    `INSERT OR REPLACE INTO session_context
+       (id, project, key, value, updatedAt, source_type, authored_by, trust_score, last_validated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, project, key, valueStr, now, sourceType, authoredBy, trustScore, lastValidatedAt);
 }
 
 /**
@@ -40,10 +51,22 @@ export function getSessionContext(project, key) {
 
 /**
  * Get all session context entries for a project.
+ *
+ * `opts.trustThreshold` filters out below-threshold rows (memory-poisoning
+ * defense). Defaults to `getTrustThreshold()` (env-driven, 0.5 by default).
+ * Pass `0` to retrieve everything regardless of trust.
  */
-export function getAllSessionContext(project) {
+export function getAllSessionContext(project, opts = {}) {
   if (!project) throw new Error('project is required');
-  return stmt('SELECT * FROM session_context WHERE project = ? ORDER BY updatedAt DESC').all(project);
+  const threshold = (opts.trustThreshold === undefined || opts.trustThreshold === null)
+    ? getTrustThreshold()
+    : Number(opts.trustThreshold);
+  return getDb().prepare(
+    `SELECT * FROM session_context
+       WHERE project = ?
+         AND COALESCE(trust_score, 0.5) >= ?
+       ORDER BY updatedAt DESC`,
+  ).all(project, threshold);
 }
 
 /**
