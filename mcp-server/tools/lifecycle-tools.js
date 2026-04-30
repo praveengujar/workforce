@@ -8,6 +8,11 @@ import { logEvent, getTaskTimeline } from '../core/task-events.js';
 import { mergeWorktree, cleanupWorktree } from '../core/worker-manager.js';
 import { gitExec } from '../core/constants.js';
 import { captureEpisode, isEpisodicEnabled } from '../core/episodic-memory.js';
+import {
+  captureFailureEpisode,
+  captureDecisionsFromTask,
+  captureRisksFromTask,
+} from '../core/context-capture-pipeline.js';
 
 // ---------------------------------------------------------------------------
 // Gate enforcement — required evidence phases before merge
@@ -145,17 +150,24 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
     return { ok: false, merged: false, error: freshTask.error || 'Merge failed' };
   }
 
-  // Best-effort episodic capture — never fails the merge.
-  if (isEpisodicEnabled()) {
-    setImmediate(() => {
+  // Best-effort episodic capture + M7 decision/risk capture — never fails the merge.
+  setImmediate(() => {
+    const merged = getTask(task_id);
+    if (!merged) return;
+    if (isEpisodicEnabled()) {
       try {
-        const merged = getTask(task_id);
-        if (merged) captureEpisode({ task: merged, repoRoot: _projectDir });
+        captureEpisode({ task: merged, repoRoot: _projectDir });
       } catch (err) {
         console.error(`[lifecycle] episodic capture failed for ${task_id}: ${err.message}`);
       }
-    });
-  }
+    }
+    try { captureDecisionsFromTask(merged); } catch (err) {
+      console.error(`[lifecycle] decision capture failed for ${task_id}: ${err.message}`);
+    }
+    try { captureRisksFromTask(merged); } catch (err) {
+      console.error(`[lifecycle] risk capture failed for ${task_id}: ${err.message}`);
+    }
+  });
 
   return { ok: true, merged: true, waivedGates: gateResult.waived };
 }
@@ -176,5 +188,21 @@ export function rejectTaskHandler({ task_id, reason }) {
   logEvent(task.id, 'rejected', 'User rejected changes');
 
   cleanupWorktree(task.id, task.worktreePath);
+
+  // Best-effort failure-path capture (PRD §9.7) — never fails the rejection.
+  setImmediate(() => {
+    const rejected = getTask(task.id);
+    if (!rejected) return;
+    try { captureFailureEpisode({ task: rejected, repoRoot: _projectDir }); } catch (err) {
+      console.error(`[lifecycle] failure-episode capture failed for ${task.id}: ${err.message}`);
+    }
+    try { captureDecisionsFromTask(rejected); } catch (err) {
+      console.error(`[lifecycle] decision capture failed for ${task.id}: ${err.message}`);
+    }
+    try { captureRisksFromTask(rejected); } catch (err) {
+      console.error(`[lifecycle] risk capture failed for ${task.id}: ${err.message}`);
+    }
+  });
+
   return { ok: true };
 }

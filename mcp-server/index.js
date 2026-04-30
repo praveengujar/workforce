@@ -89,6 +89,10 @@ import {
 } from './tools/episodic-tools.js';
 
 import {
+  proposeRuleFromEvalCluster, listProposedRules,
+} from './core/context-capture-pipeline.js';
+
+import {
   addContextItemHandler, searchContextItemsHandler,
   previewContextHandler, auditContextHandler,
   invalidateContextHandler, promoteContextHandler,
@@ -838,6 +842,37 @@ server.tool(
     dryRun: z.boolean().optional().describe('Preview candidates without invalidating (default false)'),
   },
   wrap(compactContextHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Context Fabric — Capture Pipeline (M7)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_propose_rule_from_cluster',
+  'Draft a proposed_rules row from an eval cluster (3+ similar failures). Manual MCP only — capture pipeline never auto-promotes clusters per PRD §9.7. cluster_id may be the deterministic cluster hash returned by detection or any one eval id that belongs to a cluster. Returns the inserted draft row, or null if no matching cluster exists.',
+  {
+    cluster_id: z.string().describe('Cluster id (category:hash) or any eval id from the cluster'),
+    project: z.string().optional().describe('Project name to scope the proposed rule (default "_global")'),
+  },
+  wrap(({ cluster_id, project }) => {
+    const row = proposeRuleFromEvalCluster(cluster_id, { project });
+    return row ? row : { ok: false, reason: 'no matching cluster found' };
+  }),
+);
+
+server.tool(
+  'workforce_list_proposed_rules',
+  'List proposed_rules queue entries (eval clusters, risk keyword hits, decision keyword hits, manual drafts). Filters by project + status; ORDER BY created_at DESC. M7 is write-only — the approval workflow is deferred to PRD §16 P3.1.',
+  {
+    project: z.string().optional().describe('Filter by project'),
+    status: z.enum(['pending', 'approved', 'rejected', 'superseded']).optional().describe('Filter by status (default: any)'),
+    limit: z.number().optional().describe('Max rows (default 50, max 500)'),
+  },
+  wrap(({ project, status, limit }) => {
+    const rows = listProposedRules({ project, status, limit });
+    return { count: rows.length, rows };
+  }),
 );
 
 // ---------------------------------------------------------------------------
