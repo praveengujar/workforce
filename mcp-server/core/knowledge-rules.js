@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb, stmt } from './db.js';
+import { clampTrustForSource, getTrustThreshold } from './trust.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -74,7 +75,10 @@ function matchGlob(pattern, filePath) {
  * Create or update a knowledge rule.
  * If a rule with the same category+name exists, it is updated.
  */
-export function createRule({ category, name, description, paths, content, priority, force }) {
+export function createRule({
+  category, name, description, paths, content, priority, force,
+  sourceType, authoredBy, trustScore, lastValidatedAt,
+}) {
   if (!category || !VALID_CATEGORIES.includes(category)) {
     throw new Error(`Invalid category "${category}". Valid: ${VALID_CATEGORIES.join(', ')}`);
   }
@@ -91,6 +95,13 @@ export function createRule({ category, name, description, paths, content, priori
   const pathsJson = JSON.stringify(paths);
   const prio = priority ?? 5;
 
+  // Provenance defaults (Context Fabric M2). Legacy callers without source
+  // info land as human/user/1.0; agent-tagged callers get clamped at 0.4.
+  const srcType = sourceType || 'human';
+  const author = authoredBy || (srcType === 'human' ? 'user' : srcType);
+  const trust = clampTrustForSource(srcType, trustScore);
+  const validatedAt = lastValidatedAt ?? now;
+
   // Check for existing rule with same category+name — upsert
   const existing = getDb().prepare(
     'SELECT id FROM knowledge_rules WHERE category = ? AND name = ?',
@@ -98,9 +109,15 @@ export function createRule({ category, name, description, paths, content, priori
 
   if (existing) {
     getDb().prepare(
-      `UPDATE knowledge_rules SET description = ?, paths = ?, content = ?, priority = ?, updatedAt = ?
+      `UPDATE knowledge_rules
+         SET description = ?, paths = ?, content = ?, priority = ?, updatedAt = ?,
+             source_type = ?, authored_by = ?, trust_score = ?, last_validated_at = ?
        WHERE id = ?`,
-    ).run(description ?? null, pathsJson, content, prio, now, existing.id);
+    ).run(
+      description ?? null, pathsJson, content, prio, now,
+      srcType, author, trust, validatedAt,
+      existing.id,
+    );
     return getRuleById(existing.id);
   }
 
@@ -109,9 +126,14 @@ export function createRule({ category, name, description, paths, content, priori
 
   const id = randomUUID().slice(0, 8);
   getDb().prepare(
-    `INSERT INTO knowledge_rules (id, category, name, description, paths, content, priority, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, category, name, description ?? null, pathsJson, content, prio, now, now);
+    `INSERT INTO knowledge_rules
+       (id, category, name, description, paths, content, priority, createdAt, updatedAt,
+        source_type, authored_by, trust_score, last_validated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id, category, name, description ?? null, pathsJson, content, prio, now, now,
+    srcType, author, trust, validatedAt,
+  );
 
   const rule = getRuleById(id);
   if (duplicateWarning) {
@@ -140,11 +162,24 @@ export function getRuleById(id) {
 /**
  * Get all rules whose path patterns match any of the given file paths.
  * This is the "audit mapping" function — given files, return applicable rules.
+ *
+ * Trust filter (Context Fabric M2): rules with `trust_score` below the
+ * runtime threshold (env `WORKFORCE_CONTEXT_TRUST_THRESHOLD`, default 0.5)
+ * are excluded — defends against poisoned agent-authored rules. Pass
+ * `opts.trustThreshold = 0` to bypass the filter (audit/admin paths).
  */
-export function getRulesForPaths(filePaths) {
+export function getRulesForPaths(filePaths, opts = {}) {
   if (!filePaths || filePaths.length === 0) return [];
 
-  const allRules = stmt('SELECT * FROM knowledge_rules ORDER BY priority DESC').all();
+  const threshold = (opts.trustThreshold === undefined || opts.trustThreshold === null)
+    ? getTrustThreshold()
+    : Number(opts.trustThreshold);
+
+  const allRules = getDb().prepare(
+    `SELECT * FROM knowledge_rules
+       WHERE COALESCE(trust_score, 0.5) >= ?
+       ORDER BY priority DESC`,
+  ).all(threshold);
   const matched = [];
 
   for (const rule of allRules) {
@@ -215,7 +250,7 @@ const KEYWORD_CATEGORY_MAP = {
  * Get rules matching keywords in text (for prompts without explicit file paths).
  * Returns rules whose categories match detected keywords.
  */
-export function getRulesForKeywords(text) {
+export function getRulesForKeywords(text, opts = {}) {
   if (!text) return [];
   const textLower = text.toLowerCase();
   const matchedCategories = new Set();
@@ -231,11 +266,18 @@ export function getRulesForKeywords(text) {
 
   if (matchedCategories.size === 0) return [];
 
+  const threshold = (opts.trustThreshold === undefined || opts.trustThreshold === null)
+    ? getTrustThreshold()
+    : Number(opts.trustThreshold);
+
   const cats = [...matchedCategories];
   const placeholders = cats.map(() => '?').join(', ');
   return getDb().prepare(
-    `SELECT * FROM knowledge_rules WHERE category IN (${placeholders}) ORDER BY priority DESC`,
-  ).all(...cats);
+    `SELECT * FROM knowledge_rules
+       WHERE category IN (${placeholders})
+         AND COALESCE(trust_score, 0.5) >= ?
+       ORDER BY priority DESC`,
+  ).all(...cats, threshold);
 }
 
 // ---------------------------------------------------------------------------
