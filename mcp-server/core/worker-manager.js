@@ -791,7 +791,12 @@ Before finishing, verify your work:
     const fullCommand = `cat ${JSON.stringify(promptFile)} | ${CLAUDE_CLI} --print --dangerously-skip-permissions`;
 
     try {
-      createSession(tmuxSession, fullCommand, worktreePath);
+      // Tag the spawned agent's environment so MCP tool calls (knowledge_rules,
+      // session_context) can detect agent provenance and clamp trust at 0.4.
+      // Pattern matches the FORWARD_ENV_PREFIXES export block in core/tmux.js.
+      createSession(tmuxSession, fullCommand, worktreePath, {
+        WORKFORCE_AGENT_TASK_ID: taskId,
+      });
     } catch (err) {
       cleanupWorktree(taskId, worktreePath);
       throw new Error(`tmux session creation failed: ${err.message}`);
@@ -892,7 +897,7 @@ Before finishing, verify your work:
   const child = spawn('sh', ['-c', `cat ${JSON.stringify(promptFile)} | ${CLAUDE_CLI} --print --dangerously-skip-permissions`], {
     cwd: worktreePath,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: { ...process.env, WORKFORCE_AGENT_TASK_ID: taskId },
   });
 
   // Declare timers before use so they are in scope for the error handler
