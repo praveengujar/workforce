@@ -10,8 +10,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 
 ## Stack
 
-- **MCP server** (stdio) — 53 tools for task lifecycle, backlog, monitoring, context management, ops dashboard, loop detection
-- **Skills** — 17 C-suite officer skills (see Skill Routing below)
+- **MCP server** (stdio) — 65 tools for task lifecycle, backlog, monitoring, context management, episodic memory, ops dashboard, loop detection, replay harness
+- **Skills** — 18 skills (15 C-suite officers + dashboard, queue janitor, version) (see Skill Routing below)
 - **Agents** — 14 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect, cco-writer, cmo-strategist, clo-counsel, pmm-strategist
 - **Loop detection** — Ralph Wiggum detector catches agents stuck in unproductive cycles
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
