@@ -60,6 +60,9 @@ import { getAllSessionContext } from './session-context.js';
 import { recallEpisodes, isEpisodicEnabled } from './episodic-memory.js';
 import { assembleContext } from './context-assembler.js';
 import { applyContextFabric } from './context-fabric-mode.js';
+import { scaffoldScratchpad, readScratchpadFindings } from './scratchpad.js';
+import { loadTraceForChild, formatTraceForPrompt } from './task-trace.js';
+import { getDb } from './db.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -471,6 +474,15 @@ async function spawnWorker(task) {
   // 1b. Set up worktree environment (symlink node_modules, .env files)
   setupWorktreeEnvironment(worktreePath, repoRoot);
 
+  // 1c. Context Fabric M8 — scaffold .workforce/scratch/ scratchpad files
+  // (PRD §9.9, Manus pattern). Best-effort — scaffold failure must never
+  // break a task spawn.
+  try {
+    scaffoldScratchpad(worktreePath);
+  } catch (err) {
+    console.error(`[worker-manager] scratchpad scaffold failed for ${taskId}: ${err.message}`);
+  }
+
   // Record the base commit so zero-work guard can compare against it (not HEAD)
   let baseCommit;
   try {
@@ -774,6 +786,37 @@ Before finishing, verify your work:
 - Check: do your changes work with the existing patterns (imports, naming, error handling)?
 - If a test command is available, run it.
 - Write a one-sentence summary of what you changed and why (this becomes the result summary).`;
+  }
+
+  // Context Fabric M8 — PRIOR ATTEMPT FINDINGS (retry survival, PRD §9.9).
+  // On retry, prepend the surviving scratchpad findings.md so the new attempt
+  // can read what the prior attempt learned. Best-effort, never breaks spawn.
+  if ((task.retryCount ?? 0) > 0) {
+    try {
+      const priorFindings = readScratchpadFindings(worktreePath, 4000);
+      if (priorFindings) {
+        effectivePrompt = `[PRIOR ATTEMPT FINDINGS — Trust: MEDIUM (from previous retry of this task)]\n${priorFindings}\n\n${effectivePrompt}`;
+      }
+    } catch (err) {
+      console.error(`[worker-manager] prior-findings prepend failed for ${taskId}: ${err.message}`);
+    }
+  }
+
+  // Context Fabric M8 — PARENT TASK TRACE (sub-agent handoff, PRD §9.11).
+  // When a task has a parent, prepend the parent's gzipped trace so the child
+  // does not lose parent intent (Cognition failure mode). Best-effort.
+  if (task.parentId) {
+    try {
+      const trace = loadTraceForChild(getDb(), task.parentId);
+      if (trace) {
+        const block = formatTraceForPrompt(trace, 6000);
+        if (block) {
+          effectivePrompt = `[PARENT TASK TRACE — Trust: HIGH (handoff from parent task ${String(task.parentId).slice(0, 8)})]\n${block}\n\n${effectivePrompt}`;
+        }
+      }
+    } catch (err) {
+      console.error(`[worker-manager] parent-trace prepend failed for ${taskId}: ${err.message}`);
+    }
   }
 
   // Context Fabric (M6): in shadow mode, run the assembler purely for its

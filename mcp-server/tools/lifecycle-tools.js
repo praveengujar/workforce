@@ -3,7 +3,7 @@
  * Pure functions, no Express dependency. Uses execFileSync for git safety.
  */
 
-import { getTask, updateTask } from '../core/db.js';
+import { getTask, updateTask, getDb } from '../core/db.js';
 import { logEvent, getTaskTimeline } from '../core/task-events.js';
 import { mergeWorktree, cleanupWorktree } from '../core/worker-manager.js';
 import { gitExec } from '../core/constants.js';
@@ -13,6 +13,8 @@ import {
   captureDecisionsFromTask,
   captureRisksFromTask,
 } from '../core/context-capture-pipeline.js';
+import { captureScratchpadOnMerge } from '../core/scratchpad.js';
+import { buildTraceForTask, persistTrace } from '../core/task-trace.js';
 
 // ---------------------------------------------------------------------------
 // Gate enforcement — required evidence phases before merge
@@ -142,6 +144,14 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
 
   logEvent(task.id, 'approved', reason || 'Approved by user');
 
+  // M8 — capture scratchpad findings BEFORE mergeWorktree removes the
+  // worktree. Best-effort, never throws.
+  try {
+    captureScratchpadOnMerge(getDb(), task.id, task.worktreePath, 'merged');
+  } catch (err) {
+    console.error(`[lifecycle] scratchpad capture failed for ${task_id}: ${err.message}`);
+  }
+
   await mergeWorktree(task);
 
   // Check if merge actually succeeded
@@ -167,6 +177,14 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
     try { captureRisksFromTask(merged); } catch (err) {
       console.error(`[lifecycle] risk capture failed for ${task_id}: ${err.message}`);
     }
+    // M8 — sub-agent trace handoff. Builds trace from DB rows just written
+    // above; safe to defer to setImmediate.
+    try {
+      const buf = buildTraceForTask(getDb(), task_id);
+      if (buf) persistTrace(getDb(), task_id, buf);
+    } catch (err) {
+      console.error(`[lifecycle] task-trace persist failed for ${task_id}: ${err.message}`);
+    }
   });
 
   return { ok: true, merged: true, waivedGates: gateResult.waived };
@@ -186,6 +204,15 @@ export function rejectTaskHandler({ task_id, reason }) {
     completedAt: new Date().toISOString(),
   });
   logEvent(task.id, 'rejected', 'User rejected changes');
+
+  // M8 — capture scratchpad findings BEFORE cleanupWorktree removes the file.
+  // Best-effort, never throws — wrapped in try/catch so a capture failure can
+  // never block rejection.
+  try {
+    captureScratchpadOnMerge(getDb(), task.id, task.worktreePath, 'rejected');
+  } catch (err) {
+    console.error(`[lifecycle] scratchpad reject-capture failed for ${task.id}: ${err.message}`);
+  }
 
   cleanupWorktree(task.id, task.worktreePath);
 
