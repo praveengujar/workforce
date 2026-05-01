@@ -24,6 +24,7 @@ Workforce lets you run multiple Claude Code agents in parallel, each working on 
 - **Sequential thinking**: Every agent gets a task-type-aware reasoning protocol — structured thinking before acting, with retry reasoning and self-review checklists
 - **Loop detection**: Ralph Wiggum detector catches agents stuck repeating the same failure or spinning with no progress
 - **Structured human gates**: AskUserQuestion at 7 critical decision points prevents LLM auto-deciding on merges, costs, and reviews
+- **Context Management Fabric**: Typed context items with provenance, trust scoring, episodic memory, and an assembler that composes prompt blocks under explicit token budgets — runs in shadow mode by default for telemetry
 
 ## Install
 
@@ -80,6 +81,10 @@ Once installed, use these slash commands inside Claude Code:
 /workforce-cqo                          # CQO — E2E testing + test plans (also: gates)
 /workforce-cdo                          # CDO — design system consultation (also: shotgun)
 /workforce-cplo "add notifications"     # CPLO — full-stack implementation planning across all layers
+/workforce-cco                          # CCO — technical writing (docs, README, API ref, tutorial, changelog prose)
+/workforce-cmo                          # CMO + PMM mode — positioning, launch posts, messaging house, battlecards, ICP, win-loss
+/workforce-clo                          # CLO — license compliance, dep audit, privacy scan, contract redline, ToS
+/workforce-clean                        # Bulk cleanup of stuck, orphaned, and unrecoverable tasks
 ```
 
 ## How it works
@@ -266,6 +271,21 @@ Runs every 30 seconds, detecting and auto-repairing 8 failure patterns. Each det
 | 6a | Ralph Wiggum — same error hash on 2+ retries | Flag loop, create eval, stop retrying |
 | 6b | Ralph Wiggum — running >5 min with no file changes | Flag no-progress loop |
 
+### Context Management Fabric
+
+A typed context store with assembler, telemetry, and shadow-mode rollout. The hardcoded 10-layer block above always runs as a safety net; the fabric block is purely additive (prepended, never replacing).
+
+| Mode | Behavior |
+|------|----------|
+| `off` | Assembler skipped entirely |
+| `shadow` (default) | Assembler runs to write audit + per-layer telemetry; prompt unchanged |
+| `analysis` | Assembler block injected only for `analysis` tasks |
+| `all` | Assembler block injected for every task |
+
+Resolution order: `WORKFORCE_CONTEXT_FABRIC_MODE` env var → `context.fabricMode` in `defaults.json` → fallback `shadow`. Unknown values warn to stderr and fall back to `shadow`. Assembler errors are isolated — a fabric failure never breaks a task spawn.
+
+Manage context items via `workforce_context_*` tools (add, search, preview, promote, invalidate, compact, audit). Episodic memory (failure episodes, decisions, risks) feeds back into the assembler via `workforce_capture_episode` and `workforce_recall_episodes`.
+
 ### Cost model
 
 Self-calibrating tier-based estimator:
@@ -286,7 +306,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
 ├── mcp-server/
-│   ├── index.js                   # Entry point — registers 53 MCP tools
+│   ├── index.js                   # Entry point — registers 65 MCP tools
 │   ├── package.json               # Dependencies (@modelcontextprotocol/sdk)
 │   ├── core/
 │   │   ├── db.js                  # SQLite database (13 migrations, 12 tables)
@@ -327,32 +347,40 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 14 C-suite officer skills
+├── skills/                        # 15 C-suite officer skills + 3 utility
 │   ├── workforce/                 # Dashboard view
+│   ├── workforce-clean/           # Bulk cleanup of stuck/orphaned/unrecoverable tasks
+│   ├── workforce-version/         # Version info
 │   ├── workforce-cao/             # CAO — rescue, forensics, cleanup
+│   ├── workforce-cco/             # CCO — docs, README, API ref, tutorial, changelog prose
 │   ├── workforce-cdo/             # CDO — design consultation, shotgun variants
 │   ├── workforce-ceo/             # CEO — strict gated orchestrator + adaptive pipeline
 │   ├── workforce-cfo/             # CFO — health, retro, budget
 │   ├── workforce-cio/             # CIO — rules, eval, context
+│   ├── workforce-clo/             # CLO — license, dep audit, privacy, contract redline, ToS
+│   ├── workforce-cmo/             # CMO + PMM mode — positioning, launch, messaging house, ICP
 │   ├── workforce-coo/             # COO — launch, chain, sprint, decompose
 │   ├── workforce-cplo/            # CPLO — full-stack implementation planning
 │   ├── workforce-cpo/             # CPO — backlog, release
 │   ├── workforce-cqo/             # CQO — qa, testplan, gates
 │   ├── workforce-cro/             # CRO — safety guardrails
 │   ├── workforce-cso/             # CSO — 14-phase security audit
-│   ├── workforce-cto/             # CTO — review, rubberduck, adversarial, merge, experiment
-│   └── workforce-version/         # Version info
-├── agents/                        # 10 agent definitions (C-suite)
+│   └── workforce-cto/             # CTO — review, rubberduck, adversarial, merge, experiment
+├── agents/                        # 14 agent definitions (C-suite)
 │   ├── coo-planner.md             # COO — decomposes complex tasks into subtasks
 │   ├── cpo-analyst.md             # CPO — prioritizes and stack-ranks backlog
-│   ├── cto-researcher.md          # CTO — iterative code experiments
-│   ├── cto-analyst.md             # CTO — deep-dive requirements analysis
-│   ├── cao-forensics.md           # CAO — deep failure investigation
 │   ├── cpo-release.md             # CPO — release preparation
+│   ├── cto-analyst.md             # CTO — deep-dive requirements analysis
+│   ├── cto-researcher.md          # CTO — iterative code experiments
+│   ├── cao-forensics.md           # CAO — deep failure investigation
 │   ├── cqo-engineer.md            # CQO — E2E test writing with Playwright
 │   ├── cio-curator.md             # CIO — eval → rule pipeline automation
 │   ├── cso-auditor.md             # CSO — security audit agent
-│   └── cplo-architect.md          # CPLO — full-stack planning architect
+│   ├── cplo-architect.md          # CPLO — full-stack planning architect
+│   ├── cco-writer.md              # CCO — technical writing autonomous worker
+│   ├── cmo-strategist.md          # CMO — brand/positioning autonomous worker
+│   ├── clo-counsel.md             # CLO — legal review autonomous worker
+│   └── pmm-strategist.md          # PMM — per-product GTM artifacts
 ├── scripts/
 │   └── bump-version.js            # Version update utility
 └── hooks/
@@ -362,7 +390,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
     └── check-careful.sh           # PreToolUse hook — intercepts destructive commands
 ```
 
-## MCP tools reference (53 tools)
+## MCP tools reference (65 tools)
 
 ### Task management (13)
 
@@ -409,7 +437,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | `workforce_read_context` | Read shared context for a task group |
 | `workforce_group_status` | Status of all tasks in a group with dependency tree |
 
-### Knowledge rules (4)
+### Knowledge rules (6)
 
 | Tool | Description |
 |------|-------------|
@@ -417,6 +445,8 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | `workforce_list_rules` | List rules, optionally filtered by category |
 | `workforce_get_rules_for_path` | Get all rules matching given file paths (audit mapping) |
 | `workforce_delete_rule` | Delete a rule by ID |
+| `workforce_list_proposed_rules` | List proposed rules from eval clusters awaiting review |
+| `workforce_propose_rule_from_cluster` | Generate a rule proposal from a detected eval cluster |
 
 ### Eval feedback loop (3)
 
@@ -438,6 +468,31 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | Tool | Description |
 |------|-------------|
 | `workforce_dependency_graph` | Build/query import graph (build, query_impact, query_dependencies, stats) |
+
+### Episodic memory (2)
+
+| Tool | Description |
+|------|-------------|
+| `workforce_capture_episode` | Capture an episode (failure, decision, risk) into episodic memory |
+| `workforce_recall_episodes` | Recall episodes matching a query, ranked by recency and trust |
+
+### Context Fabric (7)
+
+| Tool | Description |
+|------|-------------|
+| `workforce_context_add` | Add a typed context item with provenance, trust, and optional expiry |
+| `workforce_context_search` | Search context items by query, type, project, trust |
+| `workforce_context_preview` | Preview the assembled context block for a task without spawning |
+| `workforce_context_promote` | Promote a context item to a higher trust tier |
+| `workforce_context_invalidate` | Mark a context item invalid (out-of-date or wrong) |
+| `workforce_context_compact` | Compact stale or low-trust items to control token spend |
+| `workforce_context_audit` | Per-task audit of which items were included or evicted |
+
+### Replay harness (1)
+
+| Tool | Description |
+|------|-------------|
+| `workforce_replay_golden_set` | Replay golden prompt assemblies for regression testing |
 
 ### Monitoring & cost (8)
 
@@ -481,11 +536,11 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 
 SQLite via Node.js built-in `node:sqlite` (DatabaseSync). Stored at the plugin's persistent data directory (`${CLAUDE_PLUGIN_DATA}/workforce.db`).
 
-### Schema (12 tables, 13 migrations)
+### Schema (19 tables, 19 migrations)
 
 | Table | Purpose |
 |-------|---------|
-| **tasks** | Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, timestamps, taskType, dependsOn, taskGroup, phase, loopDetected, lastErrorHash) |
+| **tasks** | Core task state (id, prompt, status, project, branch, worktreePath, pid, output, error, merged, cost, timestamps, taskType, dependsOn, taskGroup, phase, loopDetected, lastErrorHash, task_trace) |
 | **task_events** | Append-only lifecycle log (taskId, phase, detail, timestamp) |
 | **workers** | Active worker processes (taskId, pid, logPath) |
 | **launch_claims** | Atomic task claiming to prevent double-launch |
@@ -494,11 +549,18 @@ SQLite via Node.js built-in `node:sqlite` (DatabaseSync). Stored at the plugin's
 | **shared_context** | Task group coordination key-value store |
 | **experiments** | Iterative experiment state and iteration history |
 | **schema_migrations** | Migration version tracking |
-| **knowledge_rules** | Path-scoped domain knowledge (category, name, paths, content, priority) |
+| **knowledge_rules** | Path-scoped domain knowledge with provenance + trust (category, name, paths, content, priority) |
 | **eval_logs** | Failure evaluations (taskId, category, whatHappened, rootCause, correctApproach, preventiveUpdate, severity) |
-| **session_context** | Cross-session persistent KV store (project, key, value) |
+| **session_context** | Cross-session persistent KV store with provenance + trust (project, key, value) |
+| **replay_runs** | Golden replay harness state for regression testing prompt assembly |
+| **episodic_memory** | Captured episodes (failures, decisions, risks) for recall during context assembly |
+| **context_items** | Typed context items (typed payloads with provenance, trust, expiry) |
+| **context_blocks** | Assembled prompt blocks composed from context items with budgets |
+| **task_context_audits** | Per-task audit log of which context items were included or evicted |
+| **prompt_layers** | Per-layer telemetry on token counts, eviction, and trust mix |
+| **proposed_rules** | Rule curation pipeline — proposals from eval clusters awaiting review |
 
-Auto-migrates from legacy `~/.claude/tasks/claude-agents.db` on first run. 13 migrations applied incrementally.
+Auto-migrates from legacy `~/.claude/tasks/claude-agents.db` on first run. 19 migrations applied incrementally.
 
 ## Configuration
 

@@ -3,7 +3,7 @@
 /**
  * Workforce MCP Server — stdio transport.
  *
- * Exposes 48 tools for managing autonomous Claude Code agent sessions.
+ * Exposes 65 tools for managing autonomous Claude Code agent sessions.
  * Replaces the Express+WebSocket backend with a single MCP server process.
  */
 
