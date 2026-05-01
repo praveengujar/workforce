@@ -96,6 +96,7 @@ Recovery engine Rules 6a/6b detect agents stuck in unproductive loops:
 | Skill | Officer | Default Action | All Actions |
 |-------|---------|---------------|-------------|
 | `/workforce` | Boardroom | dashboard | status |
+| `/workforce-clean` | Queue Janitor | sweep | sweep (stuck + orphaned + unrecoverable bulk cleanup) |
 | `/workforce-ceo` | Chief Executive Officer | plan | plan, pipeline |
 | `/workforce-coo` | Chief Operating Officer | launch | launch, chain, sprint, decompose |
 | `/workforce-cto` | Chief Technology Officer | review | review, rubberduck, adversarial, merge, experiment |
