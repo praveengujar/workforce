@@ -398,6 +398,23 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(18, new Date().toISOString());
     console.error('[db] Applied migration 18: proposed_rules table');
   }
+
+  // Migration 19: Context Fabric M8 — task_trace BLOB column on tasks for
+  // sub-agent trace handoff (PRD §9.11). Idempotent via PRAGMA table_info,
+  // matches the pattern used by migrations 2/3/7/8/13.
+  const m19 = db.prepare('SELECT version FROM schema_migrations WHERE version = 19').get();
+  if (!m19) {
+    applyMigration19(db);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(19, new Date().toISOString());
+    console.error('[db] Applied migration 19: task_trace BLOB column on tasks');
+  }
+}
+
+export function applyMigration19(db) {
+  const cols = db.prepare('PRAGMA table_info(tasks)').all();
+  if (!cols.some(c => c.name === 'task_trace')) {
+    db['exec']('ALTER TABLE tasks ADD COLUMN task_trace BLOB');
+  }
 }
 
 const M18_DDL = `
