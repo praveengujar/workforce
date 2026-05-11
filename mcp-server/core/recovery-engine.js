@@ -77,6 +77,20 @@ function rule0cWriteRaceVictim(task) {
   return false;
 }
 
+// Rule 0d: review-already-merged — task is in `review` but its branch is already
+// merged into the target. Happens when CEO/CTO merged the PR through GitHub or
+// the user ran `git merge` manually instead of going through approveTaskHandler.
+// Auto-resolve to `done` so the task doesn't rot waiting for human approval.
+function rule0dReviewAlreadyMerged(task) {
+  if (task.status !== 'review') return false;
+  const branch = task.branch || '';
+  if (!branch) return false;
+  if (!branchMergedInGit(branch)) return false;
+  updateTask(task.id, { status: 'done', merged: 1, completedAt: new Date().toISOString() });
+  logEvent(task.id, 'completed', 'Rule 0d: branch already merged into target — auto-resolved from review');
+  return true;
+}
+
 function rule1GhostRunner(task) {
   if (task.status !== 'running' || !task.pid) return false;
   if (!isPidAlive(task.pid)) {
@@ -218,6 +232,7 @@ export function runRecoveryScan() {
     if (rule0aZombieRetry(task)) { repairs.push({ taskId: task.id, rule: '0a', action: 'zombie_retry_failed' }); continue; }
     if (rule0bStuckMerge(task)) { repairs.push({ taskId: task.id, rule: '0b', action: 'stuck_merge_resolved' }); continue; }
     if (rule0cWriteRaceVictim(task)) { repairs.push({ taskId: task.id, rule: '0c', action: 'write_race_fixed' }); continue; }
+    if (rule0dReviewAlreadyMerged(task)) { repairs.push({ taskId: task.id, rule: '0d', action: 'review_auto_resolved' }); continue; }
     if (rule1GhostRunner(task)) { repairs.push({ taskId: task.id, rule: '1', action: 'ghost_runner_failed' }); continue; }
     if (rules2and3BinaryOrHook(task)) { repairs.push({ taskId: task.id, rule: '2-3', action: 'escalation_no_retry' }); continue; }
     if (rules4and5StaleOrRateLimit(task)) { repairs.push({ taskId: task.id, rule: '4-5', action: 'auto_retry_or_exhausted' }); continue; }

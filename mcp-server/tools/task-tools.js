@@ -267,6 +267,16 @@ export async function cleanupTasksHandler({ max_age_hours, include_stuck, dry_ru
         continue;
       }
     }
+
+    // Stuck review tasks — work completed but awaiting human approval for > max_age.
+    // No completedAt is set on review transition, so startedAt is the age proxy (worker
+    // exited shortly after startedAt for any task that reached review).
+    if (include_stuck && task.status === 'review' && task.startedAt) {
+      if (now - new Date(task.startedAt).getTime() > maxAge) {
+        targets.push({ id: task.id, status: task.status, reason: 'stuck review', age: task.startedAt });
+        continue;
+      }
+    }
   }
 
   if (dry_run || targets.length === 0) {
@@ -291,6 +301,14 @@ export async function cleanupTasksHandler({ max_age_hours, include_stuck, dry_ru
       updateTask(task.id, { status: 'failed', error: 'Cleaned up: stuck task', completedAt: new Date().toISOString() });
       logEvent(task.id, 'cleanup', `Stuck ${task.status} task cleaned up`);
       cancelled++;
+    }
+
+    // Abandoned review tasks: worker already exited, but the worktree is still on disk.
+    // Drop it so the branch doesn't accumulate. Mark as rejected so audit history is honest.
+    if (task.status === 'review') {
+      if (task.worktreePath) cleanupWorktree(task.id, task.worktreePath);
+      updateTask(task.id, { status: 'rejected', error: 'Cleaned up: stuck in review', completedAt: new Date().toISOString() });
+      logEvent(task.id, 'cleanup', 'Stuck review task cleaned up');
     }
 
     // Archive all targets

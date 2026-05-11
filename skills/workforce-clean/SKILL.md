@@ -13,9 +13,11 @@ Categorize cleanup candidates into three buckets, preview them, and confirm befo
 
 | Category | Definition | Detection |
 |----------|------------|-----------|
-| **Stuck** | `pending` or `running` tasks idle past threshold | `workforce_cleanup` with `include_stuck: true` |
+| **Stuck** | `pending`, `running`, or `review` tasks idle past threshold | `workforce_cleanup` with `include_stuck: true` |
 | **Orphaned** | `failed` / `rejected` tasks older than threshold, not archived | `workforce_cleanup` default behavior |
 | **Unrecoverable** | Ralph Wiggum loops — same error N+ retries, or no progress while running | `workforce_loop_status` `activeLoops[]` |
+
+Stuck-in-`review` tasks are the most common form of queue rot: a worker completed work, no human approved/rejected it, and the task sat for days. `workforce_cleanup` reclassifies these as `rejected` (audit-honest) before archiving and drops the worktree.
 
 Threshold defaults to 24h. User overrides parsed from invocation: `older than 48h`, `only stuck`, `only loops`, `aggressive` (= 6h threshold + include all categories).
 
