@@ -39,7 +39,7 @@ Phases: `pending → running → review → merging → done/failed`
 - Up to 5 concurrent tasks (configurable via WORKFORCE_MAX_CONCURRENT)
 - Watchdog kills tasks running > 30 min (configurable via WORKFORCE_TASK_TIMEOUT)
 - Zero-work guard: no real code changes → marked `failed`
-- Recovery engine detects 8 failure patterns every 30s (including Ralph Wiggum loop detection), auto-creates eval entries
+- Recovery engine detects 9 failure patterns every 30s (including Ralph Wiggum loop detection and review-already-merged auto-resolve), auto-creates eval entries
 - Post-merge verification: detects test command, runs after merge, logs pass/fail
 
 ## Task types
