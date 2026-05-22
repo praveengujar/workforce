@@ -408,6 +408,81 @@ function _applySchema(db) {
     db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(19, new Date().toISOString());
     console.error('[db] Applied migration 19: task_trace BLOB column on tasks');
   }
+
+  // Migration 20: Autonomy — per-task autonomy state, autonomy_runs (with
+  // lease), notification_outbox. v3.7 autonomous overnight mode.
+  const m20 = db.prepare('SELECT version FROM schema_migrations WHERE version = 20').get();
+  if (!m20) {
+    applyMigration20(db);
+    db.prepare('INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)').run(20, new Date().toISOString());
+    console.error('[db] Applied migration 20: autonomy columns + autonomy_runs + notification_outbox');
+  }
+}
+
+const M20_AUTONOMY_TASK_COLUMNS = [
+  ['autonomyMode',     'TEXT'],
+  ['autonomyDecision', 'TEXT'],
+  ['autonomyRunId',    'TEXT'],
+  ['mergeSha',         'TEXT'],
+  ['revertSha',        'TEXT'],
+  ['revertedAt',       'TEXT'],
+  ['parkedReason',     'TEXT'],
+];
+
+const M20_DDL = `
+  CREATE TABLE IF NOT EXISTS autonomy_runs (
+    runId            TEXT PRIMARY KEY,
+    repoRoot         TEXT NOT NULL,
+    mode             TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    ownerPid         INTEGER,
+    heartbeatAt      TEXT,
+    leaseExpiresAt   TEXT,
+    stagingBranch    TEXT,
+    baseBranch       TEXT,
+    budgetCapUsd     REAL,
+    maxConcurrency   INTEGER,
+    policyVersion    TEXT,
+    configHash       TEXT,
+    snapshot         TEXT,
+    consecutiveFailures INTEGER NOT NULL DEFAULT 0,
+    haltReason       TEXT,
+    startedAt        TEXT NOT NULL,
+    endedAt          TEXT,
+    endReason        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_autonomy_runs_repoRoot ON autonomy_runs(repoRoot);
+  CREATE INDEX IF NOT EXISTS idx_autonomy_runs_status ON autonomy_runs(status);
+
+  CREATE TABLE IF NOT EXISTS notification_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel     TEXT NOT NULL,
+    severity    TEXT NOT NULL DEFAULT 'info',
+    runId       TEXT,
+    taskId      TEXT,
+    subject     TEXT NOT NULL,
+    body        TEXT,
+    payload     TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    lastError   TEXT,
+    nextAttemptAt TEXT,
+    createdAt   TEXT NOT NULL,
+    deliveredAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_notification_outbox_status ON notification_outbox(status);
+  CREATE INDEX IF NOT EXISTS idx_notification_outbox_nextAttemptAt ON notification_outbox(nextAttemptAt);
+`;
+
+export function applyMigration20(db) {
+  const cols = db.prepare('PRAGMA table_info(tasks)').all();
+  const have = new Set(cols.map((c) => c.name));
+  for (const [name, type] of M20_AUTONOMY_TASK_COLUMNS) {
+    if (!have.has(name)) {
+      db['exec'](`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
+    }
+  }
+  db['exec'](M20_DDL);
 }
 
 export function applyMigration19(db) {
@@ -612,6 +687,8 @@ const TASK_COLUMNS = new Set([
   'taskType', 'experimentConfig',
   'parentId', 'dependsOn', 'taskGroup', 'phase', 'resultSummary', 'retryAfter', 'targetBranch', 'baseCommit',
   'loopDetected', 'lastErrorHash',
+  'autonomyMode', 'autonomyDecision', 'autonomyRunId',
+  'mergeSha', 'revertSha', 'revertedAt', 'parkedReason',
 ]);
 
 export function updateTask(id, updates) {
@@ -817,4 +894,112 @@ export function getTasksByGroup(taskGroup) {
   return stmt(
     "SELECT * FROM tasks WHERE taskGroup = ? ORDER BY phase ASC, createdAt ASC",
   ).all(taskGroup);
+}
+
+// ---------------------------------------------------------------------------
+// Autonomy runs (Migration 20)
+// ---------------------------------------------------------------------------
+
+export function insertAutonomyRun(row) {
+  stmt(`
+    INSERT INTO autonomy_runs (
+      runId, repoRoot, mode, status, ownerPid, heartbeatAt, leaseExpiresAt,
+      stagingBranch, baseBranch, budgetCapUsd, maxConcurrency,
+      policyVersion, configHash, snapshot, consecutiveFailures,
+      haltReason, startedAt, endedAt, endReason
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.runId, row.repoRoot, row.mode, row.status,
+    row.ownerPid ?? null, row.heartbeatAt ?? null, row.leaseExpiresAt ?? null,
+    row.stagingBranch ?? null, row.baseBranch ?? null,
+    row.budgetCapUsd ?? null, row.maxConcurrency ?? null,
+    row.policyVersion ?? null, row.configHash ?? null, row.snapshot ?? null,
+    row.consecutiveFailures ?? 0,
+    row.haltReason ?? null, row.startedAt,
+    row.endedAt ?? null, row.endReason ?? null,
+  );
+}
+
+const AUTONOMY_RUN_COLUMNS = new Set([
+  'mode', 'status', 'ownerPid', 'heartbeatAt', 'leaseExpiresAt',
+  'stagingBranch', 'baseBranch', 'budgetCapUsd', 'maxConcurrency',
+  'policyVersion', 'configHash', 'snapshot', 'consecutiveFailures',
+  'haltReason', 'endedAt', 'endReason',
+]);
+
+export function updateAutonomyRun(runId, updates) {
+  const keys = Object.keys(updates).filter((k) => AUTONOMY_RUN_COLUMNS.has(k));
+  if (keys.length === 0) return getAutonomyRun(runId);
+  const setClauses = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => updates[k]);
+  getDb().prepare(`UPDATE autonomy_runs SET ${setClauses} WHERE runId = ?`).run(...values, runId);
+  return getAutonomyRun(runId);
+}
+
+export function getAutonomyRun(runId) {
+  return stmt('SELECT * FROM autonomy_runs WHERE runId = ?').get(runId) || null;
+}
+
+export function getActiveAutonomyRun(repoRoot) {
+  return stmt(
+    "SELECT * FROM autonomy_runs WHERE repoRoot = ? AND status = 'active' ORDER BY startedAt DESC LIMIT 1",
+  ).get(repoRoot) || null;
+}
+
+export function listRecentAutonomyRuns(repoRoot, limit = 20) {
+  return stmt(
+    'SELECT * FROM autonomy_runs WHERE repoRoot = ? ORDER BY startedAt DESC LIMIT ?',
+  ).all(repoRoot, limit);
+}
+
+// ---------------------------------------------------------------------------
+// Notification outbox (Migration 20)
+// ---------------------------------------------------------------------------
+
+export function enqueueNotification(row) {
+  const now = new Date().toISOString();
+  stmt(`
+    INSERT INTO notification_outbox (
+      channel, severity, runId, taskId, subject, body, payload,
+      status, attempts, nextAttemptAt, createdAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+  `).run(
+    row.channel, row.severity ?? 'info',
+    row.runId ?? null, row.taskId ?? null,
+    row.subject, row.body ?? null,
+    row.payload ? JSON.stringify(row.payload) : null,
+    now, now,
+  );
+}
+
+export function listPendingNotifications(limit = 50) {
+  const now = new Date().toISOString();
+  return stmt(`
+    SELECT * FROM notification_outbox
+    WHERE status = 'pending' AND (nextAttemptAt IS NULL OR nextAttemptAt <= ?)
+    ORDER BY id ASC LIMIT ?
+  `).all(now, limit);
+}
+
+export function markNotificationDelivered(id) {
+  const now = new Date().toISOString();
+  stmt(
+    "UPDATE notification_outbox SET status = 'delivered', deliveredAt = ? WHERE id = ?",
+  ).run(now, id);
+}
+
+export function markNotificationFailed(id, error, nextAttemptAt, attempts) {
+  stmt(`
+    UPDATE notification_outbox
+    SET attempts = ?, lastError = ?, nextAttemptAt = ?,
+        status = CASE WHEN ? IS NULL THEN 'failed' ELSE 'pending' END
+    WHERE id = ?
+  `).run(attempts, error, nextAttemptAt, nextAttemptAt, id);
+}
+
+export function listOutboxByRun(runId, includeDelivered = true) {
+  if (includeDelivered) {
+    return stmt('SELECT * FROM notification_outbox WHERE runId = ? ORDER BY id ASC').all(runId);
+  }
+  return stmt("SELECT * FROM notification_outbox WHERE runId = ? AND status != 'delivered' ORDER BY id ASC").all(runId);
 }

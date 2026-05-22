@@ -3,6 +3,24 @@
  */
 
 import { createRule, listRules, getRulesForPaths, deleteRule } from '../core/knowledge-rules.js';
+import { getMode as getAutonomyMode, getAutonomyConfig } from '../core/autonomy-controller.js';
+
+/**
+ * Block rule promotion (create + delete) when autonomy is in a live mode
+ * (`auto` or `park`) and lockdown is enabled. `proposed_rules` writes via
+ * other code paths (cio-curator) are unaffected. Shadow mode does not lock.
+ */
+function ensureNotLockedDown(action) {
+  const cfg = getAutonomyConfig();
+  if (cfg.knowledgeLockdown === false) return;
+  const mode = getAutonomyMode(process.cwd());
+  if (mode === 'auto' || mode === 'park') {
+    throw new Error(
+      `knowledge lockdown: ${action} blocked while autonomy mode=${mode}. ` +
+      `Use proposed_rules to draft for human review, or stop autonomy first.`,
+    );
+  }
+}
 
 // See session-tools.js — `WORKFORCE_AGENT_TASK_ID` distinguishes spawned-agent
 // writes from human writes. Agent rules are clamped at trust=0.4 inside
@@ -16,6 +34,7 @@ function getCallerProvenance() {
 }
 
 export function createRuleHandler({ category, name, description, paths, content, priority }) {
+  ensureNotLockedDown('create_rule');
   const provenance = getCallerProvenance();
   const rule = createRule({
     category, name, description, paths, content, priority,
@@ -68,6 +87,7 @@ export function getRulesForPathHandler({ paths }) {
 }
 
 export function deleteRuleHandler({ id }) {
+  ensureNotLockedDown('delete_rule');
   if (!id) throw new Error('id is required');
   const deleted = deleteRule(id);
   return { ok: true, deleted: { id: deleted.id, name: deleted.name, category: deleted.category } };

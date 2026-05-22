@@ -3,6 +3,44 @@
 All notable changes to the Workforce plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.7.0] - 2026-05-19
+
+### Added
+
+- **Autonomy mode** — opt-in autonomous overnight operation across four first-class modes:
+  - `off` — normal human gates (default)
+  - `shadow` — policy evaluates every approval and persists a verdict; never alters lifecycle. Safe to leave running for calibration.
+  - `park` — policy acts on verdicts but never merges; parks decisions for the morning human pass.
+  - `auto` — policy can auto-merge approved tasks, but only to per-run staging branch `autonomous/staging/<runId>`. Never touches `main`, `master`, `release/*`, or any user-configured protected branch.
+- **Structured policy verdicts** with `policyVersion` + `configHash` on every decision. Checks include: `reviewScore`, `securityScore`, `blastRadius`, `protectedPaths`, `preMergeTests`, `freshness`, `budget`, `branch`, `knowledgeWrites`. Blast-radius classifier marks `auth`, `payments`, `migrations`, `ci`, `deps`, `public-api` as high-risk regardless of diff size.
+- **Pre-merge verification** — autonomy runs the project test command inside the worktree before merging. Red parks the task; no merge churn.
+- **Post-merge revert-on-failure** — captures `mergeSha`, runs the existing post-merge test pass, and on failure executes `git revert` with the correct mechanic (merge commit vs fast-forward). Revert conflicts halt the run and leave the branch untouched.
+- **Freshness checks** — merge-base distance against configured maximum, dry-run conflict detection, upstream protected-file changes, reverted-dependency detection.
+- **Run lease** — prevents two autonomy controllers running against the same repo. Force-takeover available with explicit flag.
+- **Notification outbox** — synchronous writes to a `notification_outbox` table; async drain delivers to macOS `osascript`, Slack webhook, or `mail`/`mailx` with exponential backoff. Severity-tagged (`info`/`warning`/`critical`). Autonomy never blocks on a channel.
+- **Knowledge-rule + high-trust write lockdown** — `workforce_create_rule` and `workforce_delete_rule` blocked at the MCP tool layer while autonomy is in `auto` or `park`. Proposed rules still allowed.
+- **Halt semantics** — `WORKFORCE_AUTONOMY=halt` env kill switch + `workforce_autonomy_halt` tool, checked before every spawn and every merge. Mid-merge halt completes the in-flight verification/revert decision before stopping.
+- **Recovery auto-handling** — under autonomy, Ralph Wiggum same-error 2x auto-switches to analysis mode; 3x kills + parks. No-progress >5min kills + parks. No `AskUserQuestion` prompts; everything routes to the outbox.
+- **Concurrency override** — autonomy reduces max concurrent tasks (default 3) to bound overnight blast radius.
+- 8 new MCP tools: `workforce_autonomy_start`, `_stop`, `_status`, `_heartbeat`, `_evaluate`, `_morning`, `_halt`, `_resume`.
+- `/workforce-autonomy` skill — opt-in surface. `start <mode>` asks one confirmation with the full policy snapshot, then no further interactive prompts.
+- 20 new tests (`mcp-server/test/autonomy.test.js`) — policy verdicts, controller lease, halt semantics, notifier outbox, staging branch.
+
+### Changed
+
+- `validateGates()` now accepts `autonomy_decision` as a substitute for `human_decision`, but only when `task.autonomyMode === 'auto'` AND the persisted verdict says `auto-approve`. Gate validation stays dumb — no policy re-evaluation. Real human approval remains semantically distinct in the event stream.
+- `mergeWorktree` enforces the full configured protected-branch glob list under autonomy (defense in depth on top of the creation-time rewrite).
+- `promotePending` checks autonomy halt + concurrency override before every promotion cycle.
+- Schema bumped to migration 20; new tables `autonomy_runs` (lease + run snapshot) and `notification_outbox`; new task columns `autonomyMode`, `autonomyDecision`, `autonomyRunId`, `mergeSha`, `revertSha`, `revertedAt`, `parkedReason`.
+- MCP tool count: 65 → 73.
+- Skill count: 18 → 19 (added `/workforce-autonomy`).
+
+### Safety notes
+
+- Autonomy is opt-in and not enabled by default. Out-of-the-box behavior is unchanged.
+- Per-run staging branches are non-negotiable for `auto` mode — protected branches are blocked at task creation, merge time, and revert time.
+- Shadow mode is first-class — recommend running for at least a week before flipping to `park` or `auto` so the policy can be calibrated against your actual approval patterns.
+
 ## [3.6.0] - 2026-04-30
 
 ### Added

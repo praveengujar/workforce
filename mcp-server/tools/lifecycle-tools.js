@@ -26,19 +26,36 @@ const CONDITIONAL_GATES = ['qa', 'security', 'adversarial'];
 
 /**
  * Check if required gate evidence exists in task events.
- * Returns { passed: boolean, missing: string[], waived: string[] }
+ *
+ * Autonomy: `human_decision` may be SUBSTITUTED by `autonomy_decision` when
+ *   1. task.autonomyMode === 'auto', AND
+ *   2. an autonomy_decision event exists, AND
+ *   3. task.autonomyDecision JSON has decision === 'auto-approve'
+ *
+ * This function stays deliberately dumb — it does NOT re-evaluate the policy.
+ * The policy ran once before the event was written; we only verify the
+ * persisted verdict says approve.
+ *
+ * Returns { passed: boolean, missing: string[], waived: string[], substituted: string[] }
  */
-function validateGates(taskId, waivers = []) {
+function validateGates(taskId, waivers = [], task = null) {
   const events = getTaskTimeline(taskId);
   const phases = new Set(events.map(e => e.phase));
   const waiverSet = new Set(waivers.map(w => w.gate));
 
   const missing = [];
   const waived = [];
+  const substituted = [];
 
-  // Required gates must always be present (or waived)
+  const taskRow = task || getTask(taskId);
+
+  // Required gates must always be present (or waived, or substituted by autonomy)
   for (const gate of REQUIRED_GATES) {
     if (phases.has(gate)) continue;
+    if (gate === 'human_decision' && _autonomySubstitutes(taskRow, phases)) {
+      substituted.push(gate);
+      continue;
+    }
     if (waiverSet.has(gate)) {
       waived.push(gate);
       continue;
@@ -58,7 +75,20 @@ function validateGates(taskId, waivers = []) {
     missing.push(gate);
   }
 
-  return { passed: missing.length === 0, missing, waived };
+  return { passed: missing.length === 0, missing, waived, substituted };
+}
+
+function _autonomySubstitutes(task, phases) {
+  if (!task) return false;
+  if (task.autonomyMode !== 'auto') return false;
+  if (!phases.has('autonomy_decision')) return false;
+  if (!task.autonomyDecision) return false;
+  try {
+    const verdict = JSON.parse(task.autonomyDecision);
+    return verdict && verdict.decision === 'auto-approve';
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +154,7 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
 
   // Gate enforcement — check required evidence before merge
   const parsedWaivers = Array.isArray(waivers) ? waivers : [];
-  const gateResult = validateGates(task.id, parsedWaivers);
+  const gateResult = validateGates(task.id, parsedWaivers, task);
 
   // Log waivers as auditable events
   for (const w of parsedWaivers) {
@@ -187,7 +217,12 @@ export async function approveTaskHandler({ task_id, reason, waivers }) {
     }
   });
 
-  return { ok: true, merged: true, waivedGates: gateResult.waived };
+  return {
+    ok: true,
+    merged: true,
+    waivedGates: gateResult.waived,
+    substitutedGates: gateResult.substituted,
+  };
 }
 
 // ---------------------------------------------------------------------------

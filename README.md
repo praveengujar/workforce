@@ -1,4 +1,4 @@
-# Workforce v3.6.0
+# Workforce v3.7.0
 
 A Claude Code plugin that turns Claude into a task orchestrator with self-improving AI context memory — spawning autonomous agent sessions in isolated git worktrees, injecting domain knowledge, learning from failures, and merging results back to the target branch.
 
@@ -25,6 +25,7 @@ Workforce lets you run multiple Claude Code agents in parallel, each working on 
 - **Loop detection**: Ralph Wiggum detector catches agents stuck repeating the same failure or spinning with no progress
 - **Structured human gates**: AskUserQuestion at 7 critical decision points prevents LLM auto-deciding on merges, costs, and reviews
 - **Context Management Fabric**: Typed context items with provenance, trust scoring, episodic memory, and an assembler that composes prompt blocks under explicit token budgets — runs in shadow mode by default for telemetry
+- **Autonomous overnight mode**: Opt-in autonomy with structured policy verdicts, per-run staging branches, pre-merge + post-merge verification, and revert-on-failure. Shadow / park / auto modes; never touches protected branches
 
 ## Install
 
@@ -85,6 +86,9 @@ Once installed, use these slash commands inside Claude Code:
 /workforce-cmo                          # CMO + PMM mode — positioning, launch posts, messaging house, battlecards, ICP, win-loss
 /workforce-clo                          # CLO — license compliance, dep audit, privacy scan, contract redline, ToS
 /workforce-clean                        # Bulk cleanup of stuck, orphaned, and unrecoverable tasks
+/workforce-autonomy start shadow        # Autonomy — log policy verdicts only (calibration)
+/workforce-autonomy start auto          # Autonomy — auto-merge approved tasks to staging
+/workforce-autonomy morning             # Overnight triage: merged/parked/reverted/failed
 ```
 
 ## How it works
@@ -286,6 +290,50 @@ Resolution order: `WORKFORCE_CONTEXT_FABRIC_MODE` env var → `context.fabricMod
 
 Manage context items via `workforce_context_*` tools (add, search, preview, promote, invalidate, compact, audit). Episodic memory (failure episodes, decisions, risks) feeds back into the assembler via `workforce_capture_episode` and `workforce_recall_episodes`.
 
+### Autonomous overnight mode
+
+Opt-in autonomy lets workforce process the queue without a human at the keyboard. Four first-class modes:
+
+| Mode | Policy evaluates? | Can park? | Can merge? | Default safe? |
+|------|-------------------|-----------|------------|---------------|
+| `off` | no | no | n/a | yes — out-of-the-box behavior |
+| `shadow` | yes — logs only | no | no | yes — observation only, recommended for calibration |
+| `park` | yes | yes | no | yes — never alters branches |
+| `auto` | yes | yes | yes — staging only | requires explicit opt-in |
+
+**Policy verdicts** are structured and versioned. Every decision persists to `tasks.autonomyDecision` with `policyVersion` + `configHash` so the morning forensics view can pin down exactly which thresholds approved (or parked) the change. Checks:
+
+| Check | What it catches |
+|-------|-----------------|
+| `reviewScore` | Falls below configured minimum (default 80) |
+| `securityScore` | Any security finding (default min 100). Score 0 → auto-reject |
+| `blastRadius` | Diff size limits + high-risk category classifier (`auth`, `payments`, `migrations`, `ci`, `deps`, `public-api`). A 10-line auth change parks regardless of size |
+| `protectedPaths` | Glob list (CI configs, lockfiles, hooks, `.github/`, migrations) |
+| `preMergeTests` | Project test command runs inside the worktree before merging. Red parks |
+| `freshness` | Merge-base distance, dry-run conflict detection, upstream protected-file changes, reverted-dependency check |
+| `budget` | Nightly USD ceiling not exceeded |
+| `branch` | Target branch is not in the protected glob list |
+| `knowledgeWrites` | No knowledge-rule promotion happened during this run |
+
+**Merge contract under `auto`:**
+
+1. Pre-merge tests pass → merge with `--no-ff` → record `mergeSha`.
+2. Post-merge tests pass → status `done`.
+3. Post-merge tests fail → `git revert -m 1 <mergeSha>` (merge commit) or `git revert <sha>` (fast-forward) → status `reverted`, `revertSha` recorded.
+4. Revert conflict → **halt the run, leave the branch untouched**, page human.
+
+**Safety rails always on under autonomy:**
+
+- Per-run staging branches `autonomous/staging/<runId>`. Protected branches enforced at task creation, merge time, and revert time.
+- Run lease prevents two controllers running against the same repo.
+- Halt is checked before every spawn and every merge. `WORKFORCE_AUTONOMY=halt` is a kill switch.
+- Notifications go to a persistent outbox first (synchronous), drained async to macOS / Slack / email — autonomy never blocks on a channel.
+- `workforce_create_rule` and `workforce_delete_rule` blocked at the MCP tool layer while autonomy is in `auto` or `park`. Proposed rules still allowed.
+- Concurrency clamped to `autonomy.maxConcurrencyOverride` (default 3) under `auto` to bound blast radius.
+- Recovery engine auto-handles Ralph Wiggum loops: same-error 2x switches to analysis; 3x or no-progress >5min kills + parks.
+
+Use via `/workforce-autonomy start <mode>` — confirms a complete policy snapshot once, then runs without further interactive prompts. `/workforce-autonomy morning` renders a single-screen overnight triage with counts of merged / parked / reverted / failed, per-task verdict reasons, and undelivered notifications.
+
 ### Cost model
 
 Self-calibrating tier-based estimator:
@@ -301,15 +349,19 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 ## Architecture
 
 ```
-├── .claude-plugin/plugin.json     # Plugin manifest (v3.6.0)
+├── .claude-plugin/plugin.json     # Plugin manifest (v3.7.0)
 ├── .mcp.json                      # MCP server config (stdio transport)
 ├── CLAUDE.md                      # Project instructions
 ├── README.md
 ├── mcp-server/
-│   ├── index.js                   # Entry point — registers 65 MCP tools
+│   ├── index.js                   # Entry point — registers 73 MCP tools
 │   ├── package.json               # Dependencies (@modelcontextprotocol/sdk)
 │   ├── core/
-│   │   ├── db.js                  # SQLite database (13 migrations, 12 tables)
+│   │   ├── db.js                  # SQLite database (20 migrations)
+│   │   ├── autonomy-controller.js # Autonomy mode, lease, halt, budget cap, concurrency override
+│   │   ├── autonomy-policy.js     # Pure verdict engine — structured checks, policyVersion + configHash
+│   │   ├── autonomy-evidence.js   # Diff stats, pre-merge tests, freshness checks
+│   │   ├── notifier.js            # Notification outbox + drain worker (macOS / Slack / email)
 │   │   ├── worker-manager.js      # Spawn workers, 10-layer context injection (incl. thinking protocol), merge, cleanup
 │   │   ├── recovery-engine.js     # 8-rule self-healing scan + Ralph Wiggum loop detection + eval creation
 │   │   ├── knowledge-rules.js     # Path-scoped rule engine with glob matching + keyword matching
@@ -347,9 +399,10 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 │   │   └── metrics-targets.json   # Health metric targets and warning thresholds
 │   └── scripts/
 │       └── seed-reusable-library-rules.js # Seed baseline reusable-library rules
-├── skills/                        # 15 C-suite officer skills + 3 utility
+├── skills/                        # 15 C-suite officer skills + 4 utility
 │   ├── workforce/                 # Dashboard view
 │   ├── workforce-clean/           # Bulk cleanup of stuck/orphaned/unrecoverable tasks
+│   ├── workforce-autonomy/        # Autonomous overnight mode (start/stop/status/morning)
 │   ├── workforce-version/         # Version info
 │   ├── workforce-cao/             # CAO — rescue, forensics, cleanup
 │   ├── workforce-cco/             # CCO — docs, README, API ref, tutorial, changelog prose
@@ -390,7 +443,7 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
     └── check-careful.sh           # PreToolUse hook — intercepts destructive commands
 ```
 
-## MCP tools reference (65 tools)
+## MCP tools reference (73 tools)
 
 ### Task management (13)
 
@@ -493,6 +546,19 @@ Tracks actual costs per tier. When the observed median drifts >15% from the esti
 | Tool | Description |
 |------|-------------|
 | `workforce_replay_golden_set` | Replay golden prompt assemblies for regression testing |
+
+### Autonomy (8)
+
+| Tool | Description |
+|------|-------------|
+| `workforce_autonomy_start` | Start an autonomy run (mode=shadow/park/auto). Creates per-run staging branch under `auto` |
+| `workforce_autonomy_stop` | End the active run; in-flight merges complete |
+| `workforce_autonomy_status` | Show current mode, active run, lease state, policy version, config hash |
+| `workforce_autonomy_heartbeat` | Refresh the active run lease |
+| `workforce_autonomy_evaluate` | Collect evidence + run policy on one task. Persists verdict, acts according to mode |
+| `workforce_autonomy_morning` | Overnight triage: merged/parked/reverted/failed counts + per-task verdicts |
+| `workforce_autonomy_halt` | Halt the active run (refuses new spawns + new merges) |
+| `workforce_autonomy_resume` | Clear halt and reset consecutive-failure counter |
 
 ### Monitoring & cost (8)
 

@@ -20,6 +20,12 @@ import { isTmuxAvailable, hasSession, sendKeys, capturePane } from '../core/tmux
 import { estimateTaskCost } from '../core/task-cost.js';
 import { evaluateTaskCost } from './cost-approval.js';
 import { DATA_DIR, ensureDir } from '../core/constants.js';
+import {
+  getMode as getAutonomyMode,
+  currentRun as currentAutonomyRun,
+  getAutonomyConfig,
+} from '../core/autonomy-controller.js';
+import { matchesGlob as _matchesGlob } from '../core/autonomy-policy.js';
 
 // ---------------------------------------------------------------------------
 // createTaskHandler
@@ -50,10 +56,37 @@ export async function createTaskHandler({ prompt, project, autoMerge, parent_id,
   if (phase != null) extras.phase = phase;
   if (task_type) extras.taskType = task_type;
   // Record current branch as merge target
+  let currentBranch = null;
   try {
-    const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { stdio: 'pipe' }).toString().trim();
+    currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { stdio: 'pipe' }).toString().trim();
     extras.targetBranch = currentBranch;
   } catch { /* ignore — targetBranch stays null */ }
+
+  // Autonomy: stamp mode + run, and force protected targets to staging.
+  // `auto` mode may NEVER target a protected branch — rewrite to the
+  // run's staging branch. `shadow`/`park` only tag the task for telemetry.
+  try {
+    const repoRoot = process.cwd();
+    const autonomyMode = getAutonomyMode(repoRoot);
+    if (autonomyMode !== 'off') {
+      extras.autonomyMode = autonomyMode;
+      const run = currentAutonomyRun(repoRoot);
+      if (run) extras.autonomyRunId = run.runId;
+      if (autonomyMode === 'auto' && run && run.stagingBranch) {
+        const cfg = getAutonomyConfig();
+        const protectedBranches = cfg.protectedBranches || [];
+        const target = currentBranch || run.baseBranch || 'main';
+        const isProtected = protectedBranches.some((g) => _matchesGlob(target, g));
+        if (isProtected || target === run.baseBranch) {
+          extras.targetBranch = run.stagingBranch;
+          logEvent(id, 'target_rewritten', `${target} -> ${run.stagingBranch}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[createTask] autonomy stamp failed: ${err.message}`);
+  }
+
   if (Object.keys(extras).length > 0) {
     task = updateTask(id, extras);
   }

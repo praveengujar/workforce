@@ -8,5 +8,60 @@
   "context": {
     "captureSuccessfulTasks": true,
     "fabricMode": "shadow"
+  },
+  "autonomy": {
+    "mode": "off",
+    "policyVersion": "2026-05-19.1",
+    "reviewScoreMin": 80,
+    "securityScoreMin": 100,
+    "maxConcurrencyOverride": 3,
+    "maxRetries": 2,
+    "nightlyBudgetUsd": null,
+    "heartbeatIntervalMs": 30000,
+    "leaseTimeoutMs": 120000,
+    "consecutiveFailureThreshold": 5,
+    "parkedBacklogThreshold": 20,
+    "cleanupFailureThreshold": 10,
+    "protectedBranches": ["main", "master", "prod", "release/*"],
+    "stagingBranchPrefix": "autonomous/staging",
+    "blastRadius": {
+      "maxAdditions": 400,
+      "maxDeletions": 200,
+      "maxFiles": 15,
+      "maxDirs": 6,
+      "protectedPaths": [
+        ".github/**",
+        ".claude/**",
+        "hooks/**",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "**/migrations/**",
+        "**/*.env",
+        "**/*.env.*"
+      ],
+      "highRiskCategories": ["auth", "payments", "migrations", "ci", "deps", "public-api"],
+      "categoryGlobs": {
+        "auth": ["**/auth/**", "**/authn/**", "**/authz/**", "**/login/**", "**/session*/**"],
+        "payments": ["**/billing/**", "**/payments/**", "**/checkout/**", "**/stripe/**"],
+        "migrations": ["**/migrations/**", "**/migrate/**"],
+        "ci": [".github/**", ".gitlab-ci.yml", ".circleci/**", ".travis.yml"],
+        "deps": ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "requirements*.txt", "Pipfile*", "poetry.lock", "go.mod", "go.sum", "Cargo.toml", "Cargo.lock"],
+        "public-api": ["**/api/**", "**/public/**", "**/routes/**", "**/controllers/**"]
+      }
+    },
+    "freshness": {
+      "maxCommitsBehindBase": 10
+    },
+    "knowledgeLockdown": true,
+    "notifications": {
+      "channels": ["macos"],
+      "slackWebhookEnv": "WORKFORCE_SLACK_WEBHOOK",
+      "emailRecipientEnv": "WORKFORCE_EMAIL_RECIPIENT",
+      "minSeverity": "info",
+      "drainIntervalMs": 5000,
+      "maxAttempts": 5
+    }
   }
 }

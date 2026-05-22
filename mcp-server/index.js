@@ -103,10 +103,22 @@ import { startCostWatchdog, manualCostWatchdogScan } from './core/cost-watchdog.
 import { isSubscriptionMode } from './core/constants.js';
 import { readCostLog, getCostLogSummary } from './core/cost-tracker.js';
 
+import {
+  startRunHandler as autonomyStartHandler,
+  stopRunHandler as autonomyStopHandler,
+  statusHandler as autonomyStatusHandler,
+  heartbeatHandler as autonomyHeartbeatHandler,
+  evaluateTaskHandler as autonomyEvaluateHandler,
+  morningReportHandler as autonomyMorningHandler,
+  haltHandler as autonomyHaltHandler,
+  resumeHandler as autonomyResumeHandler,
+} from './tools/autonomy-tools.js';
+import { startDrain as startNotifierDrain } from './core/notifier.js';
+
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
-const WORKFORCE_VERSION = '3.6.0';
+const WORKFORCE_VERSION = '3.7.0';
 
 const server = new McpServer({
   name: 'workforce',
@@ -280,6 +292,80 @@ server.tool(
   'Reject a task in review status — marks as rejected and cleans up worktree.',
   { task_id: z.string().describe('Task ID to reject'), reason: z.string().optional().describe('Rejection reason') },
   wrap(rejectTaskHandler),
+);
+
+// ---------------------------------------------------------------------------
+// Autonomy Tools — overnight autonomous operation
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'workforce_autonomy_start',
+  'Start an autonomy run. mode=shadow logs verdicts only; mode=park can park tasks but never merges; mode=auto can auto-merge to per-run staging branch. Creates per-run staging branch under autonomous/staging/<runId> for auto mode.',
+  {
+    mode: z.enum(['shadow', 'park', 'auto']).describe('Autonomy mode'),
+    base_branch: z.string().optional().describe('Base branch to fork staging from (default: current)'),
+    budget_usd: z.number().optional().describe('Hard nightly budget ceiling in USD'),
+    max_concurrency: z.number().optional().describe('Override max concurrent tasks (default: 3 for auto)'),
+    duration_minutes: z.number().optional().describe('Recorded for telemetry; lease lasts 2min and is refreshed by heartbeat'),
+    force: z.boolean().optional().describe('Force takeover of a stale lease'),
+  },
+  wrap(({ mode, base_branch, budget_usd, max_concurrency, duration_minutes, force }) =>
+    autonomyStartHandler({
+      mode, baseBranch: base_branch, budgetUsd: budget_usd,
+      maxConcurrency: max_concurrency, durationMinutes: duration_minutes, force,
+    })),
+);
+
+server.tool(
+  'workforce_autonomy_stop',
+  'Stop the active autonomy run. Ends the lease and stops further autonomous merges. In-flight merges complete; new spawns refused.',
+  { reason: z.string().optional() },
+  wrap(autonomyStopHandler),
+);
+
+server.tool(
+  'workforce_autonomy_status',
+  'Show current autonomy mode, active run (if any), policy version, config hash, lease state.',
+  {},
+  wrap(autonomyStatusHandler),
+);
+
+server.tool(
+  'workforce_autonomy_heartbeat',
+  'Refresh the active run lease. Should be called by the controller process periodically (default: every 30s).',
+  { run_id: z.string().optional() },
+  wrap(autonomyHeartbeatHandler),
+);
+
+server.tool(
+  'workforce_autonomy_evaluate',
+  'Run the autonomy policy against a task. Collects evidence (diff stats, pre-merge tests, freshness) and persists a structured verdict to tasks.autonomyDecision plus an autonomy_decision event. Acts on the verdict according to the active mode (shadow: log only; park: never merge; auto: merge to staging with revert on test failure).',
+  {
+    task_id: z.string().describe('Task ID to evaluate'),
+    dry_run: z.boolean().optional().describe('Compute and persist verdict but never act'),
+  },
+  wrap(autonomyEvaluateHandler),
+);
+
+server.tool(
+  'workforce_autonomy_morning',
+  'Single-screen overnight triage: counts of merged/parked/reverted/failed, per-task summary with verdict reasons, undelivered notifications.',
+  { run_id: z.string().optional().describe('Run ID (default: most recent run for this repo)') },
+  wrap(autonomyMorningHandler),
+);
+
+server.tool(
+  'workforce_autonomy_halt',
+  'Manually halt the active run. Stops new spawns and new merges; in-flight merges complete with their verification/revert flow. Resume via workforce_autonomy_resume.',
+  { reason: z.string().optional() },
+  wrap(autonomyHaltHandler),
+);
+
+server.tool(
+  'workforce_autonomy_resume',
+  'Clear the halt on the active run. Resets the consecutive-failure counter.',
+  {},
+  wrap(autonomyResumeHandler),
 );
 
 // ---------------------------------------------------------------------------
@@ -908,6 +994,9 @@ async function main() {
 
   // 6. Start cost watchdog
   stopCostWatchdog = startCostWatchdog();
+
+  // 6b. Start notification outbox drain (autonomy)
+  startNotifierDrain();
 
   // 7. Connect MCP transport
   const transport = new StdioServerTransport();
