@@ -1,4 +1,4 @@
-# Workforce v3.6.0
+# Workforce v3.7.0
 
 Claude Code plugin for managing autonomous agent sessions with self-improving context management.
 
@@ -10,8 +10,8 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
 
 ## Stack
 
-- **MCP server** (stdio) — 65 tools for task lifecycle, backlog, monitoring, context management, episodic memory, ops dashboard, loop detection, replay harness
-- **Skills** — 18 skills (15 C-suite officers + dashboard, queue janitor, version) (see Skill Routing below)
+- **MCP server** (stdio) — 73 tools for task lifecycle, backlog, monitoring, context management, episodic memory, ops dashboard, loop detection, replay harness, autonomy
+- **Skills** — 19 skills (15 C-suite officers + dashboard, queue janitor, version, autonomy) (see Skill Routing below)
 - **Agents** — 14 definitions: coo-planner, cpo-analyst, cto-researcher, cao-forensics, cpo-release, cqo-engineer, cto-analyst, cio-curator, cso-auditor, cplo-architect, cco-writer, cmo-strategist, clo-counsel, pmm-strategist
 - **Loop detection** — Ralph Wiggum detector catches agents stuck in unproductive cycles
 - **Database** — SQLite via `node:sqlite` (DatabaseSync), stored at plugin data dir
@@ -26,7 +26,7 @@ claude --plugin-dir .   # Load this directory as a Claude Code plugin
   - `tools/` — Task, lifecycle, backlog, monitoring, knowledge, eval, session, graph tool handlers
   - `config/` — Defaults, metrics targets
   - `test/` — node:test smoke tests (lifecycle, recovery, eval, deps, router)
-- `skills/` — 17 SKILL.md files (C-suite officers)
+- `skills/` — 19 SKILL.md files (C-suite officers + utilities)
 - `agents/` — 14 agent definitions
 - `hooks/` — SessionStart cleanup, SessionEnd eval analysis, PreToolUse safety guardrails
 
@@ -112,6 +112,15 @@ Recovery engine Rules 6a/6b detect agents stuck in unproductive loops:
 | `/workforce-cco` | Chief Communications Officer | docs | docs, readme, api-ref, tutorial, changelog-prose |
 | `/workforce-cmo` | Chief Marketing Officer (+ PMM mode) | position | **CMO**: position, launch-post, landing-copy, release-announce, persona / **PMM**: messaging-house, launch-plan, battlecard, icp, win-loss, enablement |
 | `/workforce-clo` | Chief Legal Officer | review | review, license-check, dep-audit, privacy-scan, contract-redline, tos-implication |
+| `/workforce-autonomy` | Autonomy Officer | status | start &lt;mode&gt;, stop, status, morning, halt, resume, evaluate |
+
+## Autonomy mode
+
+Opt-in autonomous operation. Four first-class modes — `off` (default), `shadow` (logs verdicts only), `park` (decides but never merges), `auto` (merges to per-run staging branch). Resolution: `WORKFORCE_AUTONOMY` env (also accepts `halt` as kill switch) → active `autonomy_runs` row for the repo → `autonomy.mode` in `defaults.json` → fallback `off`. The controller (`core/autonomy-controller.js`) owns mode, lease, halt, budget cap, and concurrency override.
+
+Policy verdicts (`core/autonomy-policy.js`) are pure given inputs and structured: every verdict carries `policyVersion` + `configHash` + per-check pass/fail. `validateGates()` stays dumb — it accepts `autonomy_decision` as a substitute for `human_decision` only when `task.autonomyMode === 'auto'` AND the persisted verdict says `auto-approve`. No re-evaluation.
+
+Under `auto`: per-run staging branches (`autonomous/staging/<runId>`), pre-merge + post-merge verification, revert-on-failure with correct mechanic (merge commit vs ff), revert conflicts halt the run. Protected branches enforced at task creation, merge time, and revert time. Knowledge-rule promotion blocked at the MCP tool layer. Concurrency clamped (default 3). Recovery engine kills + parks Ralph Wiggum loops instead of paging humans. Notifications go to a persistent outbox (`notification_outbox`), drained async to macOS / Slack / email — autonomy never blocks on a channel.
 
 ## Context Fabric mode
 

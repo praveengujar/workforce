@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { getAllTasks, updateTask } from './db.js';
+import { getAllTasks, getTask, updateTask } from './db.js';
 import { logEvent } from './task-events.js';
 import { createEval } from './eval-engine.js';
+import { getMode as getAutonomyMode, currentRun as currentAutonomyRun, recordConsecutiveFailure } from './autonomy-controller.js';
+import { notify } from './notifier.js';
 
 const SCAN_INTERVAL_MS = 30_000;
 const ZOMBIE_THRESHOLD_MS = 3 * 60 * 1000;
@@ -243,7 +245,86 @@ export function runRecoveryScan() {
   if (repairs.length > 0) {
     console.error(`[recovery] scan complete — ${repairs.length} repair(s)`);
   }
+
+  // Autonomy auto-handling — for tasks under autonomy mode (auto/park), turn
+  // Ralph-Wiggum + no-progress detections into concrete actions (kill, park,
+  // optionally auto-switch to analysis on first occurrence). Shadow/off leave
+  // tasks alone — they keep relying on the human dashboard escalation.
+  try {
+    const autonomyActions = applyAutonomyAutoHandling();
+    for (const a of autonomyActions) repairs.push(a);
+  } catch (err) {
+    console.error('[recovery] autonomy auto-handling error:', err.message);
+  }
   return repairs;
+}
+
+function applyAutonomyAutoHandling() {
+  const mode = getAutonomyMode(_projectDir);
+  if (mode !== 'auto' && mode !== 'park') return [];
+
+  const actions = [];
+  const run = currentAutonomyRun(_projectDir);
+  // Walk loop-flagged tasks that haven't been resolved yet.
+  for (const t of getAllTasks()) {
+    if (!t.loopDetected) continue;
+    // Skip already-handled
+    if (t.status === 'review' && t.parkedReason && t.parkedReason.includes('loop')) continue;
+    if (t.status === 'archived' || t.status === 'rejected') continue;
+
+    const retryCount = t.retryCount ?? 0;
+    const detected = String(t.loopDetected);
+
+    // Rule 6a same-error path: on first detection retry once as analysis;
+    // on 3rd+ failure kill+park.
+    if (detected.startsWith('same_error_')) {
+      if (retryCount < 3 && t.taskType !== 'analysis') {
+        updateTask(t.id, { taskType: 'analysis' });
+        logEvent(t.id, 'autonomy_switched_to_analysis', `loop=${detected} retry=${retryCount}`);
+        actions.push({ taskId: t.id, rule: 'autonomy_loop_6a', action: 'switched_to_analysis' });
+        continue;
+      }
+      _parkLoopTask(t, `same-error loop (${detected}, retries=${retryCount})`, run);
+      actions.push({ taskId: t.id, rule: 'autonomy_loop_6a', action: 'killed_and_parked' });
+      continue;
+    }
+
+    // Rule 6b no-progress: kill + park immediately.
+    if (detected.startsWith('no_progress_')) {
+      _parkLoopTask(t, `no-progress loop (${detected})`, run);
+      actions.push({ taskId: t.id, rule: 'autonomy_loop_6b', action: 'killed_and_parked' });
+    }
+  }
+  return actions;
+}
+
+function _parkLoopTask(task, reason, run) {
+  // Best-effort kill if still running. The worker-manager owns the pid; we just
+  // mark the task and let the next scan reap. To avoid a circular import we
+  // do not call worker-manager directly here.
+  try {
+    if (task.pid && isPidAlive(task.pid)) {
+      try { process.kill(task.pid, 'SIGTERM'); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  updateTask(task.id, {
+    status: 'review',
+    parkedReason: `autonomy: ${reason}`,
+    completedAt: new Date().toISOString(),
+  });
+  logEvent(task.id, 'autonomy_parked', reason);
+  if (run) {
+    try { recordConsecutiveFailure(run.runId, run.consecutiveFailures); } catch { /* ignore */ }
+  }
+  try {
+    notify({
+      subject: `Autonomy parked loop: ${task.id.slice(0, 8)}`,
+      body: reason,
+      severity: 'warning',
+      runId: run?.runId,
+      taskId: task.id,
+    });
+  } catch { /* ignore */ }
 }
 
 export function startRecoveryEngine() {

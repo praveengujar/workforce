@@ -58,6 +58,15 @@ import { parseDetailedCost, appendCostLog } from './cost-tracker.js';
 import { getRulesForPaths, getRulesForKeywords, extractPathsFromText } from './knowledge-rules.js';
 import { getAllSessionContext } from './session-context.js';
 import { recallEpisodes, isEpisodicEnabled } from './episodic-memory.js';
+import {
+  getAutonomyConfig,
+  getMode as getAutonomyMode,
+  currentRun as currentAutonomyRun,
+  shouldHalt as autonomyShouldHalt,
+  maxConcurrencyOverride as autonomyMaxConcurrency,
+} from './autonomy-controller.js';
+import { matchesGlob } from './autonomy-policy.js';
+import { notify } from './notifier.js';
 import { assembleContext } from './context-assembler.js';
 import { applyContextFabric } from './context-fabric-mode.js';
 import { scaffoldScratchpad, readScratchpadFindings } from './scratchpad.js';
@@ -78,6 +87,7 @@ const HANDLED_EXITS = new Set(); // idempotency guard for tmux exit handling
 let PROJECT_DIR = null;
 let _promoteInterval = null;
 let _promoting = false;
+let _promoting_logged_halt = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -292,6 +302,31 @@ async function promotePending() {
   if (_promoting) return;
   _promoting = true;
   try {
+    // 0. Autonomy halt check — refuses new spawns when autonomy is halted
+    // (env kill switch, budget breach, lease expired, consecutive-failure
+    // threshold). Only applies to live modes (auto/park). Shadow is never
+    // halted; off mode bypasses the check entirely.
+    try {
+      const haltReason = autonomyShouldHalt(PROJECT_DIR);
+      if (haltReason) {
+        if (!_promoting_logged_halt || _promoting_logged_halt !== haltReason) {
+          console.error(`[promotePending] Autonomy halted: ${haltReason} — refusing spawns`);
+          _promoting_logged_halt = haltReason;
+          try {
+            notify({
+              subject: `Autonomy halted: ${haltReason}`,
+              body: 'Workforce will not spawn new tasks until autonomy is resumed.',
+              severity: 'critical',
+            });
+          } catch { /* ignore */ }
+        }
+        return;
+      }
+      _promoting_logged_halt = null;
+    } catch (err) {
+      console.error('[promotePending] halt check error:', err.message);
+    }
+
     // 1. Cascade-fail any pending tasks whose dependencies have failed
     try {
       const cascadeFailures = getCascadeFailures();
@@ -317,9 +352,11 @@ async function promotePending() {
       console.error('[promotePending] Cascade failure check error:', err.message);
     }
 
-    // 2. Check available capacity
+    // 2. Check available capacity. Autonomy may override the concurrency cap
+    // downward (default 3 under `auto`) to bound overnight blast radius.
     const running = getRunningTasks();
-    let slots = MAX_CONCURRENT - running.length;
+    const concurrencyCap = autonomyMaxConcurrency(PROJECT_DIR) || MAX_CONCURRENT;
+    let slots = concurrencyCap - running.length;
     if (slots <= 0) return;
 
     // 3. Only promote tasks whose dependencies are fully satisfied
@@ -1284,6 +1321,18 @@ async function mergeWorktree(task) {
     if (targetBranch === 'main' || targetBranch === 'master') {
       throw new Error(`Refusing to merge into protected branch "${targetBranch}". Checkout a feature branch first.`);
     }
+    // Autonomy: defense-in-depth protected-branch check using config globs.
+    // task-tools rewrites targetBranch on creation, but a stale task or a
+    // manually-injected row could still slip through.
+    if (task.autonomyMode === 'auto') {
+      const cfg = getAutonomyConfig();
+      const protectedBranches = cfg.protectedBranches || [];
+      for (const g of protectedBranches) {
+        if (matchesGlob(targetBranch, g)) {
+          throw new Error(`Autonomy refusing merge: target "${targetBranch}" matches protected glob "${g}".`);
+        }
+      }
+    }
     // Ensure we're on the target branch
     const currentBranch = gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot });
     if (currentBranch !== targetBranch) {
@@ -1372,6 +1421,34 @@ async function mergeWorktree(task) {
 
   // 8. Cleanup worktree with retries
   cleanupWorktree(taskId, worktreePath);
+}
+
+// ---------------------------------------------------------------------------
+// ensureStagingBranch — create per-run staging branch from base if missing.
+// Idempotent. Safe to call multiple times. Used at autonomy run start.
+// ---------------------------------------------------------------------------
+export function ensureStagingBranch({ repoRoot, baseBranch, stagingBranch }) {
+  if (!repoRoot || !stagingBranch) throw new Error('ensureStagingBranch requires repoRoot + stagingBranch');
+  const base = baseBranch || 'main';
+
+  // Does the branch already exist?
+  try {
+    gitExec(['rev-parse', '--verify', stagingBranch], { cwd: repoRoot });
+    return { created: false, branch: stagingBranch };
+  } catch {
+    // not found — fall through and create it
+  }
+
+  // Resolve base SHA
+  let baseSha;
+  try {
+    baseSha = gitExec(['rev-parse', base], { cwd: repoRoot });
+  } catch (err) {
+    throw new Error(`ensureStagingBranch: base branch "${base}" not found: ${err.message}`);
+  }
+
+  gitExec(['branch', stagingBranch, baseSha], { cwd: repoRoot });
+  return { created: true, branch: stagingBranch, baseSha };
 }
 
 // ---------------------------------------------------------------------------
