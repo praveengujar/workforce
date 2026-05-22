@@ -3,7 +3,7 @@
 All notable changes to the Workforce plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.7.0] - 2026-05-19
+## [3.7.0] - 2026-05-22
 
 ### Added
 

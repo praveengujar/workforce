@@ -648,6 +648,8 @@ Environment variables:
 - `WORKFORCE_TASK_TIMEOUT` — Task timeout in ms (default: 600000)
 - `WORKFORCE_DATA_DIR` — Database and log location (default: `~/.claude/tasks`)
 - `WORKFORCE_BILLING_MODE` — "subscription" or "api" (affects cost tracking)
+- `WORKFORCE_AUTONOMY` — Autonomy mode override: `off` / `shadow` / `park` / `auto`, or `halt` as a kill switch. Takes precedence over the active run and `autonomy.mode` in `defaults.json` (default: `off`)
+- `WORKFORCE_CONTEXT_FABRIC_MODE` — Context Fabric injection: `off` / `shadow` / `analysis` / `all`. Takes precedence over `context.fabricMode` in `defaults.json` (default: `shadow`)
 
 ## Requirements
 
