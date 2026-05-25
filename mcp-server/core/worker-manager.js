@@ -66,6 +66,7 @@ import {
   maxConcurrencyOverride as autonomyMaxConcurrency,
 } from './autonomy-controller.js';
 import { matchesGlob } from './autonomy-policy.js';
+import { topUpBacklog } from './autonomy-spawner.js';
 import { notify } from './notifier.js';
 import { assembleContext } from './context-assembler.js';
 import { applyContextFabric } from './context-fabric-mode.js';
@@ -88,6 +89,23 @@ let PROJECT_DIR = null;
 let _promoteInterval = null;
 let _promoting = false;
 let _promoting_logged_halt = null;
+let _createTaskHandlerCached = null;
+
+// Lazy resolver to dodge the circular import: task-tools.js imports
+// `promotePending` from this file, and we need `createTaskHandler` from there
+// to enqueue backlog work.
+async function getCreateTaskHandler() {
+  if (_createTaskHandlerCached) return _createTaskHandlerCached;
+  const mod = await import('../tools/task-tools.js');
+  _createTaskHandlerCached = mod.createTaskHandler;
+  return _createTaskHandlerCached;
+}
+
+async function topUpAutonomyBacklog() {
+  if (!PROJECT_DIR) return;
+  const createTask = await getCreateTaskHandler();
+  await topUpBacklog({ repoRoot: PROJECT_DIR, createTask });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -325,6 +343,15 @@ async function promotePending() {
       _promoting_logged_halt = null;
     } catch (err) {
       console.error('[promotePending] halt check error:', err.message);
+    }
+
+    // 0b. Autonomy backlog top-up — under park/auto, pull highest-priority
+    // backlog items into pending tasks so the run keeps making progress
+    // overnight without a human enqueueing each one.
+    try {
+      await topUpAutonomyBacklog();
+    } catch (err) {
+      console.error('[promotePending] backlog top-up error:', err.message);
     }
 
     // 1. Cascade-fail any pending tasks whose dependencies have failed
