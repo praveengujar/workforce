@@ -22,6 +22,8 @@
     "consecutiveFailureThreshold": 5,
     "parkedBacklogThreshold": 20,
     "cleanupFailureThreshold": 10,
+    "spawnFromBacklog": true,
+    "backlogSpawnPerTick": 2,
     "protectedBranches": ["main", "master", "prod", "release/*"],
     "stagingBranchPrefix": "autonomous/staging",
     "blastRadius": {

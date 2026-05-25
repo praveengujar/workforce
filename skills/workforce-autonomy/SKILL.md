@@ -19,9 +19,22 @@ When the user invokes `/workforce-autonomy`, route to the requested action. Defa
 
 ## Modes (be precise — they are not interchangeable)
 
-- **shadow** — Evaluates every approval and persists a verdict to `tasks.autonomyDecision`. **Never** changes lifecycle. Safe to leave running indefinitely for calibration.
-- **park** — Acts on verdicts but never merges. Parks tasks the policy approves, parks tasks it rejects. Useful for "let the agent batch-classify overnight, I'll merge in the morning."
-- **auto** — Acts AND merges. Targets a per-run staging branch (`autonomous/staging/<runId>`). Never touches `main`, `master`, `release/*`, `prod`. Post-merge test failure triggers automatic `git revert`; revert conflict halts the run.
+- **shadow** — Evaluates every approval and persists a verdict to `tasks.autonomyDecision`. **Never** changes lifecycle. Does not spawn from backlog. Safe to leave running indefinitely for calibration.
+- **park** — Acts on verdicts but never merges. Parks tasks the policy approves, parks tasks it rejects. **Spawns new work from backlog** (see Backlog spawning below). Useful for "let the agent batch-classify overnight, I'll merge in the morning."
+- **auto** — Acts AND merges. **Spawns new work from backlog.** Targets a per-run staging branch (`autonomous/staging/<runId>`). Never touches `main`, `master`, `release/*`, `prod`. Post-merge test failure triggers automatic `git revert`; revert conflict halts the run.
+
+## Backlog spawning (park + auto)
+
+Under `park` and `auto`, the worker-manager's promote tick (~5s) tops up the queue from `workforce_backlog_*` items:
+
+1. Headroom = `concurrencyCap − running − pending`. If ≤ 0, skip.
+2. Pull the highest-priority unclaimed items (`critical → high → medium → low`, then FIFO by `createdAt`), up to `autonomy.backlogSpawnPerTick` (default 2).
+3. Each item is claimed in the backlog file (`consumedBy: <taskId>`) BEFORE the task spawn — a crash mid-spawn can never double-issue.
+4. Created tasks are stamped with `autonomyMode` + `autonomyRunId` automatically, so under `auto` they target the per-run staging branch.
+
+Opt out per run: set `WORKFORCE_AUTONOMY_SPAWN_BACKLOG=0`, or set `autonomy.spawnFromBacklog: false` in `mcp-server/config/defaults.json`.
+
+Halt suspends spawning along with merges — `workforce_autonomy_halt` is the single off switch for both.
 
 ## Starting a run (the one and only confirmation)
 
